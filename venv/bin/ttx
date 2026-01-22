@@ -1,4 +1,4 @@
-#!/home/chrdam/data_analysis/venv/bin/python3
+#!/home/mircrda/data_analysis/venv/bin/python3
 import sys
 from fontTools.ttx import main
 if __name__ == '__main__':

@@ -14,8 +14,8 @@ import math
 
 def main():
     # Paths to the CSV files
-    default_csv_path = os.path.expandvars('/home/${USER}/devcontainer/ros2_ws/src/data_logger/logs/default_amcl/default_combined_results.csv')
-    tuning_csv_path = os.path.expandvars('/home/${USER}/devcontainer/ros2_ws/src/data_logger/logs/alpha_tuning/tuning_combined_results.csv')
+    default_csv_path = os.path.expandvars('/home/mircrda/pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl/default_combined_results.csv')
+    tuning_csv_path = os.path.expandvars('/home/${USER}/pCloudDrive/Offline/PhD/Folders/test_data/article_data/alpha_tuning/tuning_combined_results.csv')
     
     # Check if files exist
     if not os.path.exists(default_csv_path):
@@ -100,7 +100,7 @@ def main():
     
     # Create figure with subplots
     fig, axes = plt.subplots(n_rows, n_cols_grid, figsize=(5*n_cols_grid, 4*n_rows))
-    fig.suptitle('Line Plots: Default vs Tuning Comparison', fontsize=16, y=0.995)
+    # fig.suptitle('Line Plots: Default vs Tuning Comparison', fontsize=16, y=0.995)
     
     # Flatten axes array if needed
     if n_cols == 1:
@@ -117,30 +117,54 @@ def main():
     # Plot each numeric column
     for idx, col in enumerate(numeric_cols):
         ax = axes[idx]
-        # Plot default data
-        ax.plot(row_indices_default, df_default[col], linewidth=2, 
-                markersize=6, alpha=0.7, label='Default', color='blue')
-        # Plot tuning data
-        ax.plot(row_indices_tuning, df_tuning[col], linewidth=2, 
-                markersize=6, alpha=0.7, label='Tuning', color='red')
-        ax.set_xlabel('Row Index (Line Number)', fontsize=10)
+        # Plot default data (add 1 to indices to show 1-30 instead of 0-29)
+        ax.plot(row_indices_default + 1, df_default[col], linewidth=2, 
+                markersize=6, alpha=0.7, label='Default', color='red')
+        # Plot tuning data (add 1 to indices to show 1-30 instead of 0-29)
+        ax.plot(row_indices_tuning + 1, df_tuning[col], linewidth=2, 
+                markersize=6, alpha=0.7, label='Tuning', color='blue')
+        ax.set_xlabel('Run number', fontsize=10)
         ax.set_ylabel(col, fontsize=10)
-        ax.set_title(col, fontsize=11, fontweight='bold')
+        
+        # Add units to title based on column name
+        title = col
+        if 'position' in col.lower() and 'rmse' in col.lower():
+            title = f"Position RMSE [m]"
+            ax.text(0.30, 0.96, title, transform=ax.transAxes, fontsize=11, 
+            fontweight='bold', verticalalignment='top', 
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        elif 'yaw' in col.lower() and 'rmse' in col.lower():
+            title = f"Yaw RMSE [deg]"
+            ax.text(0.30, 0.96, title, transform=ax.transAxes, fontsize=11, 
+            fontweight='bold', verticalalignment='top', 
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        elif 'position_std_dev' in col.lower():
+            title = f"Position std deviation [m]"
+            ax.text(0.25, 0.96, title, transform=ax.transAxes, fontsize=11, 
+            fontweight='bold', verticalalignment='top', 
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        elif 'yaw_std_dev' in col.lower():
+            title = f"Yaw std deviation [deg]"
+            ax.text(0.20, 0.96, title, transform=ax.transAxes, fontsize=11, 
+            fontweight='bold', verticalalignment='top', 
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+        
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=9)
-        # Set x-ticks to include all indices from both datasets
-        all_indices = sorted(set(list(row_indices_default) + list(row_indices_tuning)))
-        ax.set_xticks(all_indices)
+        # Set x-ticks to show specific values: 1, 5, 10, 15, 20, 25, 30
+        x_ticks = [1, 5, 10, 15, 20, 25, 30]
+        ax.set_xticks(x_ticks)
     
     # Hide unused subplots
     for idx in range(len(numeric_cols), len(axes)):
         axes[idx].set_visible(False)
     
-    # Increase vertical spacing between subplots
-    plt.subplots_adjust(hspace=0.5, top=0.93, bottom=0.05, left=0.1, right=0.95)
+    # Adjust spacing between subplots
+    plt.subplots_adjust(hspace=0.2, top=0.95, bottom=0.05, left=0.05, right=0.95)
     
     # Save the plot
-    output_path = '/home/chrdam/data_analysis/line_plot.png'
+    output_path = f'/home/{os.getenv("USER")}/data_analysis/line_plot.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"Plot saved to {output_path}")
     
@@ -170,9 +194,9 @@ def main():
                 alpha=0.7, label='Default', color='blue', edgecolor='black', linewidth=1.2)
         ax1.bar(bin_centers_pos + bin_width_pos/4, counts_tuning_pos, width=bin_width_pos/2, 
                 alpha=0.7, label='Tuning', color='red', edgecolor='black', linewidth=1.2)
-        ax1.set_xlabel('Position RMSE', fontsize=12)
+        ax1.set_xlabel('Position RMSE [m]', fontsize=12)
         ax1.set_ylabel('Frequency', fontsize=12)
-        ax1.set_title('Position RMSE Distribution', fontsize=13, fontweight='bold')
+        ax1.set_title('Position RMSE Distribution [m]', fontsize=13, fontweight='bold')
         ax1.legend(fontsize=10)
         ax1.grid(True, alpha=0.3, axis='y')
         
@@ -192,16 +216,16 @@ def main():
                 alpha=0.7, label='Default', color='blue', edgecolor='black', linewidth=1.2)
         ax2.bar(bin_centers_yaw + bin_width_yaw/4, counts_tuning_yaw, width=bin_width_yaw/2, 
                 alpha=0.7, label='Tuning', color='red', edgecolor='black', linewidth=1.2)
-        ax2.set_xlabel('Yaw RMSE', fontsize=12)
+        ax2.set_xlabel('Yaw RMSE [deg]', fontsize=12)
         ax2.set_ylabel('Frequency', fontsize=12)
-        ax2.set_title('Yaw RMSE Distribution', fontsize=13, fontweight='bold')
+        ax2.set_title('Yaw RMSE Distribution [deg]', fontsize=13, fontweight='bold')
         ax2.legend(fontsize=10)
         ax2.grid(True, alpha=0.3, axis='y')
         
         plt.tight_layout()
         
         # Save the histogram plot
-        hist_output_path = '/home/chrdam/data_analysis/rmse_histograms.png'
+        hist_output_path = f'/home/{os.getenv("USER")}/data_analysis/rmse_histograms.png'
         fig_hist.savefig(hist_output_path, dpi=300, bbox_inches='tight')
         print(f"Histogram plot saved to {hist_output_path}")
         
