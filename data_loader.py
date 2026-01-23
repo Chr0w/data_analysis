@@ -48,8 +48,8 @@ def load_data(data_folder, N, mode='percentage', error_threshold=2.0, read_file_
             continue
         
         try:
-            # Read the CSV file
-            df_full = pd.read_csv(csv_path)
+            # Read the CSV file, skipping the first 5 data rows (rows 1-5, keeping header in row 0)
+            df_full = pd.read_csv(csv_path, skiprows=range(1, 100))
             df_full.columns = df_full.columns.str.strip()
             
             # Verify required columns exist
@@ -79,6 +79,8 @@ def load_data(data_folder, N, mode='percentage', error_threshold=2.0, read_file_
                 # Create dataframe with only valid rows
                 if valid_rows:
                     df = pd.DataFrame(valid_rows)
+                    # Add file_id column to track which file this data comes from
+                    df['file_id'] = i
                     print(f"Loaded {len(df)} rows from {csv_path} (stopped before threshold)")
                     all_data.append(df)
                 else:
@@ -89,6 +91,8 @@ def load_data(data_folder, N, mode='percentage', error_threshold=2.0, read_file_
                 total_rows = len(df_full)
                 num_rows_to_read = int(total_rows * read_file_percentage)
                 df = df_full.iloc[:num_rows_to_read].copy()
+                # Add file_id column to track which file this data comes from
+                df['file_id'] = i
                 print(f"Loaded {len(df)} rows from {csv_path} ({read_file_percentage*100:.1f}% of {total_rows} total rows)")
                 all_data.append(df)
             else:

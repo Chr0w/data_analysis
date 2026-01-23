@@ -13,6 +13,156 @@ import sys
 import argparse
 from data_loader import load_data, calculate_all_position_errors
 
+def get_b_value(esi, b1, b2, b3, b4, b5, b6):
+    """
+    Determine which b value to use based on ESI.
+    
+    Parameters:
+    -----------
+    esi : float
+        ESI value
+    b1, b2, b3, b4, b5 : float
+        Probability values for different ESI ranges
+    
+    Returns:
+    --------
+    b : float
+        The appropriate b value for the given ESI
+    """
+    if esi < 0.1:
+        return b1
+    elif esi < 0.2:
+        return b2
+    elif esi < 0.3:
+        return b3
+    elif esi < 0.4:
+        return b4
+    elif esi < 0.5:
+        return b5
+    else:
+        return b6
+
+def update_lost_track_probability(accumulated_prob, b):
+    """
+    Update the accumulated probability and calculate probability of lost track.
+    
+    Parameters:
+    -----------
+    accumulated_prob : float
+        Current accumulated probability of still being on track
+    b : float
+        Probability value for this sample. If negative (b6), reduces P(lost) by 5%
+    
+    Returns:
+    --------
+    new_accumulated_prob : float
+        Updated accumulated probability of still being on track
+    probability_of_lost_track : float
+        Probability of being lost (1 - accumulated_prob)
+    """
+    if b < 0:
+        # b6 case: reduce probability of being lost by 5%
+        # P(lost)_new = P(lost)_old * 0.95
+        # accumulated_prob_new = 1 - 0.95 * (1 - accumulated_prob_old)
+        # accumulated_prob_new = 0.05 + 0.95 * accumulated_prob_old
+        new_accumulated_prob = 0.05 + 0.95 * accumulated_prob
+    else:
+        # Normal case: multiply by (1 - b)
+        new_accumulated_prob = accumulated_prob * (1 - b)
+    
+    probability_of_lost_track = 1 - new_accumulated_prob
+    return new_accumulated_prob, probability_of_lost_track
+
+def calculate_confusion_matrix(predictions, actual_errors, error_threshold):
+    """
+    Calculate confusion matrix metrics for lost track prediction.
+    
+    Parameters:
+    -----------
+    predictions : list of bool
+        List of predictions (True = predicted lost, False = predicted not lost)
+    actual_errors : list of float
+        List of actual position errors
+    error_threshold : float
+        Error threshold in meters (above this = actually lost)
+    
+    Returns:
+    --------
+    tp : int
+        True Positives (predicted lost AND actually lost)
+    fp : int
+        False Positives (predicted lost BUT not actually lost)
+    tn : int
+        True Negatives (predicted not lost AND not actually lost)
+    fn : int
+        False Negatives (predicted not lost BUT actually lost)
+    """
+    tp = 0  # Predicted lost (True) AND actually lost (error > threshold)
+    fp = 0  # Predicted lost (True) BUT not actually lost (error <= threshold)
+    tn = 0  # Predicted not lost (False) AND not actually lost (error <= threshold)
+    fn = 0  # Predicted not lost (False) BUT actually lost (error > threshold)
+    
+    for pred, error in zip(predictions, actual_errors):
+        actually_lost = error > error_threshold
+        
+        if pred and actually_lost:
+            tp += 1
+        elif pred and not actually_lost:
+            fp += 1
+        elif not pred and not actually_lost:
+            tn += 1
+        else:  # not pred and actually_lost
+            fn += 1
+    
+    return tp, fp, tn, fn
+
+def print_confusion_matrix_results(tp, fp, tn, fn):
+    """
+    Print confusion matrix results to terminal.
+    
+    Parameters:
+    -----------
+    tp, fp, tn, fn : int
+        True Positives, False Positives, True Negatives, False Negatives
+    """
+    total = tp + fp + tn + fn
+    
+    print("\n" + "="*60)
+    print("Confusion Matrix Results:")
+    print("="*60)
+    print(f"True Positives  (TP): {tp:4d} - Predicted lost AND actually lost")
+    print(f"False Positives (FP): {fp:4d} - Predicted lost BUT not actually lost")
+    print(f"True Negatives  (TN): {tn:4d} - Predicted not lost AND not actually lost")
+    print(f"False Negatives (FN): {fn:4d} - Predicted not lost BUT actually lost")
+    print("-" * 60)
+    print(f"Total samples: {total}")
+    print()
+    
+    # Calculate metrics
+    if tp + fp > 0:
+        precision = tp / (tp + fp)
+        print(f"Precision: {precision:.4f} (TP / (TP + FP))")
+    else:
+        print("Precision: N/A (no positive predictions)")
+    
+    if tp + fn > 0:
+        recall = tp / (tp + fn)
+        print(f"Recall (Sensitivity): {recall:.4f} (TP / (TP + FN))")
+    else:
+        print("Recall: N/A (no actual positives)")
+    
+    if tn + fp > 0:
+        specificity = tn / (tn + fp)
+        print(f"Specificity: {specificity:.4f} (TN / (TN + FP))")
+    else:
+        print("Specificity: N/A (no actual negatives)")
+    
+    if tp + fp + tn + fn > 0:
+        accuracy = (tp + tn) / (tp + fp + tn + fn)
+        print(f"Accuracy: {accuracy:.4f} ((TP + TN) / Total)")
+    
+    print("="*60)
+
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
@@ -29,17 +179,34 @@ Examples:
     args = parser.parse_args()
     
 
-    show_position_error= False
+    show_position_error= True
     show_percentile_plot = False
-    show_histogram = True
+    show_histogram = False
+    predict_lost_track = True
     
     # Configuration parameters
     N = 30  # Number of files to read (starting with 1)
     M = 20  # Sample every M'th entry (starting with 50)
-    error_threshold = 0.30  # Position error threshold in meters
+    error_threshold = 0.35  # Position error threshold in meters
     read_file_percentage = 0.5  # Percentage of files to read
     ESI_threshold = 0.35  # ESI threshold in meters
-    bin_threshold = 0.5  # Distance threshold in meters that determines which histogram to place the point in 
+    bin_threshold = 0.35  # Distance threshold in meters that determines which histogram to place the point in 
+    probability_error_threshold = 0.95
+
+    probability_of_lost_track = 0.0
+    acculumated_probability_of_lost_track = 1.0  # Start at 1.0 (probability of still being on track)
+
+    common_factor = 1
+
+    b1 = 0.5 * common_factor
+    b2 = 0.287 * common_factor
+    b3 = 0.105 * common_factor
+    b4 = 0.027 * common_factor
+    b5 = 0.001 * common_factor
+    b6 = -0.05
+
+
+
 
     # Path to the folder containing CSV files
     data_folder = '/home/mircrda/pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl'
@@ -53,6 +220,8 @@ Examples:
         error_threshold=error_threshold,
         read_file_percentage=read_file_percentage
     )
+
+
     
     # Calculate position errors for all entries
     print("Calculating position errors...")
@@ -104,8 +273,15 @@ Examples:
     esi_values = []
     position_error_values = []
     line_numbers = []  # Track line numbers for color coding
+    mark_green = []  # Track which entries should be marked bright green
+    
+    # Reset accumulated probability (start on track, so probability of being lost = 0)
+    acculumated_probability_of_lost_track = 1.0
+    current_file_id = None
     
     print(f"Sampling every {M}'th entry and getting position error...")
+    print("\nProbability tracking:")
+    print("-" * 60)
     for idx in range(0, len(combined_df), M):
         # Get the absolute position error at this specific measurement
         position_error = position_errors[idx]
@@ -113,14 +289,49 @@ Examples:
         # Get ESI value at this index
         esi = combined_df.iloc[idx]['esi']
         
+        # Get file_id for this entry
+        file_id = combined_df.iloc[idx]['file_id']
+        
+        if predict_lost_track:
+            # Reset probability when switching to a new file
+            if current_file_id is not None and file_id != current_file_id:
+                acculumated_probability_of_lost_track = 1.0
+                print(f"--- Switched to file {file_id}, resetting probability ---")
+            
+            current_file_id = file_id
+            
+            # Get b value based on ESI
+            b = get_b_value(esi, b1, b2, b3, b4, b5, b6)
+            
+            # Update probability
+            acculumated_probability_of_lost_track, probability_of_lost_track = update_lost_track_probability(
+                acculumated_probability_of_lost_track, b
+            )
+            
+            # Print probability for this entry
+            print(f"Sample {idx // M + 1} (File {file_id}): ESI={esi:.4f}, b={b:.4f}, P(lost)={probability_of_lost_track:.6f}")
+            
+            # Check if we should mark this entry green
+            should_mark_green = probability_of_lost_track >= probability_error_threshold
+            mark_green.append(should_mark_green)
+        else:
+            # If not predicting lost track, don't mark any entries green
+            mark_green.append(False)
+            
         esi_values.append(esi)
         position_error_values.append(position_error)
         line_numbers.append(idx)  # Store the line number/index
         
-        if (idx // M + 1) % 10 == 0:
-            print(f"  Processed {idx // M + 1} samples...")
+        # if (idx // M + 1) % 10 == 0:
+        #     print(f"  Processed {idx // M + 1} samples...")
     
+    print("-" * 60)
     print(f"Total samples: {len(esi_values)}")
+    
+    # Calculate and print confusion matrix if predictions were made
+    if predict_lost_track:
+        tp, fp, tn, fn = calculate_confusion_matrix(mark_green, position_error_values, error_threshold)
+        print_confusion_matrix_results(tp, fp, tn, fn)
         
     if show_position_error:
         # Create the plot with color coding based on line number
@@ -138,9 +349,22 @@ Examples:
         plt.title(f'Position Error vs ESI Correlation\n(N={N} files, sampling every {M}\'th entry, {title_suffix})', fontsize=14)
         plt.grid(True, alpha=0.3)
         
+        # Mark entries that meet probability threshold in bright green
+        if any(mark_green):
+            esi_green = [esi_values[i] for i in range(len(esi_values)) if mark_green[i]]
+            pos_error_green = [position_error_values[i] for i in range(len(esi_values)) if mark_green[i]]
+            plt.scatter(esi_green, pos_error_green, 
+                       color='lime', s=100, marker='.', 
+                       edgecolors='darkgreen', linewidths=2, zorder=10,
+                       label=f'P(lost) ≥ {probability_error_threshold}')
+        
         # Add colorbar to show line number mapping
         cbar = plt.colorbar(scatter)
         cbar.set_label('Line Number (Blue=Early, Red=Late)', fontsize=10)
+        
+        # Add legend if we have green markers
+        if any(mark_green):
+            plt.legend(loc='upper right', fontsize=10)
         
         # Add some statistics
         if len(esi_values) > 0:
@@ -185,6 +409,25 @@ Examples:
         # Calculate bin centers for plotting
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
         
+        # Print counts for both histograms
+        print("\n" + "="*60)
+        print("Histogram Counts for All Bins:")
+        print("="*60)
+        below_label = f'Error ≤ {bin_threshold:.2f}m'
+        above_label = f'Error > {bin_threshold:.2f}m'
+        print(f"{'Bin Center':<12} {'Bin Range':<20} {below_label:<20} {above_label:<20} {'Total':<10} {'Ratio':<10}")
+        print("-"*60)
+        for i, center in enumerate(bin_centers):
+            bin_start = bin_edges[i]
+            bin_end = bin_edges[i+1]
+            count_below = counts_below[i]
+            count_above = counts_above[i]
+            total = count_below + count_above
+            ratio = count_above / total if total > 0 else 0.0
+            ratio_str = f'{ratio:.3f}' if total > 0 else '0.000'
+            print(f"{center:<12.2f} [{bin_start:.2f}, {bin_end:.2f})  {count_below:<20} {count_above:<20} {total:<10} {ratio_str:<10}")
+        print("="*60)
+        
         # Create histogram plot
         fig, ax = plt.subplots(figsize=(12, 6))
         
@@ -204,11 +447,11 @@ Examples:
         for i, (center, count_above, count_below) in enumerate(zip(bin_centers, counts_above, counts_below)):
             total = count_above + count_below
             if total > 0:
-                ratio = count_above / count_below if count_below > 0 else float('inf')
+                ratio = count_above / total
                 # Display ratio above the bar (at the top of the higher bar)
                 max_height = max(count_above, count_below)
                 ax.text(center, max_height + max_count * 0.05,
-                    f'{ratio:.2f}' if count_below > 0 else '∞',
+                    f'{ratio:.3f}',
                     ha='center', va='bottom', fontsize=9, fontweight='bold')
         
         ax.set_xlabel('ESI', fontsize=12)
