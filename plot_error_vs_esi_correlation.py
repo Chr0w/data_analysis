@@ -185,10 +185,10 @@ Examples:
     predict_lost_track = True
     
     # Configuration parameters
-    N = 30  # Number of files to read (starting with 1)
+    N = 15  # Number of files to read (starting with 1)
     M = 20  # Sample every M'th entry (starting with 50)
     error_threshold = 0.35  # Position error threshold in meters
-    read_file_percentage = 0.5  # Percentage of files to read
+    read_file_percentage = 1.0  # Percentage of files to read
     ESI_threshold = 0.35  # ESI threshold in meters
     bin_threshold = 0.35  # Distance threshold in meters that determines which histogram to place the point in 
     probability_error_threshold = 0.95
