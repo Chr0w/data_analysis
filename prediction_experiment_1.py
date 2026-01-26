@@ -178,10 +178,7 @@ def process_subsample(df_file, file_id, a=0.8, k=8.2, probability_threshold=0.95
         esi = row['esi']
         
         # Calculate b value using exponential function
-        if esi > 0.40:
-            b = 0.0
-        else:
-            b = exponential_b_value(esi, a=a, k=k)
+        b = exponential_b_value(esi, a=a, k=k)
         
         # Update probability
         accumulated_prob, probability_of_lost_track = update_lost_track_probability(
@@ -294,6 +291,206 @@ def print_confusion_matrix_results(tp, fp, tn, fn):
     
     print("="*60)
 
+def generate_subsamples(file_groups, num_subsamples, seed=None):
+    """
+    Generate a fixed set of subsamples.
+    
+    Parameters:
+    -----------
+    file_groups : dict
+        Dictionary of file_id -> dataframe
+    num_subsamples : int
+        Number of subsamples to generate
+    seed : int or None
+        Random seed for reproducibility
+    
+    Returns:
+    --------
+    subsamples : list
+        List of (file_id, window_df) tuples
+    """
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+    
+    subsamples = []
+    attempts = 0
+    max_attempts = num_subsamples * 10  # Prevent infinite loop
+    
+    while len(subsamples) < num_subsamples and attempts < max_attempts:
+        attempts += 1
+        
+        # Select a random file
+        file_id = random.choice(list(file_groups.keys()))
+        df_file = file_groups[file_id]
+        
+        # Get 20-second window
+        window_df = get_20_second_window(df_file, timestamp_col='timestamp')
+        
+        if window_df is None or len(window_df) < 2:
+            continue
+        
+        subsamples.append((file_id, window_df))
+    
+    return subsamples
+
+def evaluate_parameters(a, k, subsamples, probability_threshold, error_threshold):
+    """
+    Evaluate parameters a and k using pre-generated subsamples.
+    
+    Parameters:
+    -----------
+    a : float
+        Exponential function amplitude
+    k : float
+        Exponential function decay rate
+    subsamples : list
+        List of (file_id, window_df) tuples
+    probability_threshold : float
+        Threshold for positive prediction
+    error_threshold : float
+        Position error threshold in meters
+    
+    Returns:
+    --------
+    f1_score : float
+        F1 score for this parameter combination
+    tp, fp, tn, fn : int
+        Confusion matrix values
+    """
+    results = []
+    
+    for file_id, window_df in subsamples:
+        # Process the subsample
+        is_predicted_positive, is_actually_positive, _, _ = process_subsample(
+            window_df, file_id, a=a, k=k, 
+            probability_threshold=probability_threshold, 
+            error_threshold=error_threshold
+        )
+        
+        results.append({
+            'is_predicted_positive': is_predicted_positive,
+            'is_actually_positive': is_actually_positive
+        })
+    
+    if len(results) < len(subsamples):
+        # Not enough samples, return poor score
+        return 0.0, 0, 0, 0, 0
+    
+    # Calculate confusion matrix
+    predictions = [r['is_predicted_positive'] for r in results]
+    actuals = [r['is_actually_positive'] for r in results]
+    tp, fp, tn, fn = calculate_confusion_matrix(predictions, actuals)
+    
+    # Calculate F1 score
+    if tp + fp + fn == 0:
+        f1_score = 0.0
+    else:
+        f1_score = 2 * tp / (2 * tp + fp + fn)
+    
+    return f1_score, tp, fp, tn, fn
+
+def optimize_parameters(training_subsamples, probability_threshold, error_threshold, max_runs=1000):
+    """
+    Optimize parameters a and k to maximize F1 score using training subsamples.
+    
+    Parameters:
+    -----------
+    training_subsamples : list
+        List of (file_id, window_df) tuples for training
+    probability_threshold : float
+        Threshold for positive prediction
+    error_threshold : float
+        Position error threshold in meters
+    max_runs : int
+        Maximum number of function evaluations
+    
+    Returns:
+    --------
+    best_params : dict
+        Best parameters found
+    best_f1 : float
+        Best F1 score on training set
+    best_confusion : tuple
+        Confusion matrix at best parameters
+    """
+    print("\n" + "=" * 60)
+    print("PARAMETER OPTIMIZATION")
+    print("=" * 60)
+    print(f"Optimizing a and k to maximize F1 score")
+    print(f"Max evaluations: {max_runs}")
+    print(f"Parameter bounds: a in [0.1, 2.0], k in [1.0, 20.0]")
+    print("=" * 60)
+    
+    # Track evaluations
+    evaluation_count = 0
+    best_f1 = -1.0
+    best_params = None
+    best_confusion = None
+    
+    # Start with a coarse grid search
+    print("Phase 1: Coarse grid search...")
+    a_values = np.linspace(0.1, 2.0, 10)
+    k_values = np.linspace(1.0, 20.0, 10)
+    grid_evaluations = len(a_values) * len(k_values)
+    
+    if grid_evaluations <= max_runs:
+        for a in a_values:
+            for k in k_values:
+                if evaluation_count >= max_runs:
+                    break
+                evaluation_count += 1
+                f1_score, tp, fp, tn, fn = evaluate_parameters(
+                    a, k, training_subsamples, probability_threshold, error_threshold
+                )
+                
+                if f1_score > best_f1:
+                    best_f1 = f1_score
+                    best_params = {'a': a, 'k': k}
+                    best_confusion = (tp, fp, tn, fn)
+                
+                if evaluation_count % 10 == 0 or evaluation_count == 1:
+                    print(f"Run {evaluation_count:4d}: a={a:.4f}, k={k:.4f}, F1={f1_score:.4f} (Best: {best_f1:.4f})")
+            if evaluation_count >= max_runs:
+                break
+    
+    # Then do random search with remaining evaluations
+    remaining_runs = max_runs - evaluation_count
+    if remaining_runs > 0:
+        print(f"\nPerforming random search with {remaining_runs} remaining evaluations...")
+        for i in range(remaining_runs):
+            a = np.random.uniform(0.1, 2.0)
+            k = np.random.uniform(1.0, 20.0)
+            f1_score, tp, fp, tn, fn = evaluate_parameters(
+                a, k, training_subsamples, probability_threshold, error_threshold
+            )
+            evaluation_count += 1
+            
+            if f1_score > best_f1:
+                best_f1 = f1_score
+                best_params = {'a': a, 'k': k}
+                best_confusion = (tp, fp, tn, fn)
+            
+            if evaluation_count % 10 == 0:
+                print(f"Run {evaluation_count:4d}: a={a:.4f}, k={k:.4f}, F1={f1_score:.4f} (Best: {best_f1:.4f})")
+    
+    print("\n" + "=" * 60)
+    print("OPTIMIZATION COMPLETE")
+    print("=" * 60)
+    print(f"Total evaluations: {evaluation_count}")
+    if best_params:
+        print(f"Best parameters: a={best_params['a']:.6f}, k={best_params['k']:.6f}")
+        print(f"Best F1 score: {best_f1:.6f}")
+        if best_confusion:
+            tp, fp, tn, fn = best_confusion
+            print(f"\nConfusion matrix at best parameters:")
+            print(f"  TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}")
+    else:
+        print("Warning: No valid parameters found")
+    print("=" * 60)
+    
+    return best_params, best_f1, best_confusion
+
 def main():
     # Configuration parameters
     N = 30  # Number of files to read (starting with 1)
@@ -344,27 +541,34 @@ def main():
         file_groups[file_id] = sampled_df[sampled_df['file_id'] == file_id].copy()
         print(f"File {file_id}: {len(file_groups[file_id])} entries")
     
-    # Generate 100 subsamples
-    print(f"\nGenerating {num_subsamples} subsamples...")
+    # Generate training subsamples (for optimization)
+    print(f"\nGenerating {num_subsamples} training subsamples...")
+    training_subsamples = generate_subsamples(file_groups, num_subsamples, seed=42)
+    print(f"Generated {len(training_subsamples)} training subsamples")
+    
+    # Optimize parameters using training subsamples
+    best_params, best_f1_train, best_confusion_train = optimize_parameters(
+        training_subsamples, probability_threshold, error_threshold, max_runs=1000
+    )
+    
+    # Use best parameters for final evaluation
+    a = best_params['a']
+    k = best_params['k']
+    
+    print(f"\nUsing optimized parameters: a={a:.6f}, k={k:.6f}")
+    print(f"Training F1 score: {best_f1_train:.6f}")
+    
+    # Generate evaluation subsamples (different from training)
+    print(f"\nGenerating {num_subsamples} evaluation subsamples (different from training)...")
+    evaluation_subsamples = generate_subsamples(file_groups, num_subsamples, seed=123)
+    print(f"Generated {len(evaluation_subsamples)} evaluation subsamples")
+    
+    print(f"\nEvaluating on evaluation set...")
     print("=" * 60)
     
+    # Evaluate on evaluation subsamples
     results = []
-    attempts = 0
-    max_attempts = num_subsamples * 10  # Prevent infinite loop
-    
-    while len(results) < num_subsamples and attempts < max_attempts:
-        attempts += 1
-        
-        # Select a random file
-        file_id = random.choice(list(file_groups.keys()))
-        df_file = file_groups[file_id]
-        
-        # Get 20-second window
-        window_df = get_20_second_window(df_file, timestamp_col='timestamp')
-        
-        if window_df is None or len(window_df) < 2:
-            continue
-        
+    for file_id, window_df in evaluation_subsamples:
         # Process the subsample
         is_predicted_positive, is_actually_positive, final_probability, max_position_error = process_subsample(
             window_df, file_id, a=a, k=k, probability_threshold=probability_threshold, error_threshold=error_threshold
@@ -378,9 +582,6 @@ def main():
             'probability': final_probability,
             'max_position_error': max_position_error
         })
-        
-        if len(results) % 10 == 0:
-            print(f"Generated {len(results)}/{num_subsamples} subsamples...")
     
     if len(results) < num_subsamples:
         print(f"Warning: Only generated {len(results)} subsamples out of {num_subsamples} requested")
@@ -392,7 +593,10 @@ def main():
     
     # Print results
     print("\n" + "=" * 60)
-    print("RESULTS")
+    print("EVALUATION RESULTS (on evaluation set)")
+    print("=" * 60)
+    print(f"Parameters used: a={a:.6f}, k={k:.6f}")
+    print(f"Training F1 score: {best_f1_train:.6f}")
     print("=" * 60)
     
     predicted_positive_count = sum(1 for r in results if r['is_predicted_positive'])
