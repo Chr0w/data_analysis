@@ -12,6 +12,18 @@ import os
 import sys
 from data_loader import load_data, calculate_position_error
 
+
+def correct_map_integrity_ratio(mir_series: pd.Series) -> pd.Series:
+    """Correct map integrity ratio values."""
+    if mir_series is None or len(mir_series) == 0:
+        return None
+    old_mir = mir_series.values
+    unmoved = old_mir * 20
+    moved = 20 - unmoved
+    new_mir = unmoved / (unmoved + 2 * moved)
+    return pd.Series(new_mir, index=mir_series.index)
+
+
 def calculate_yaw_error(gt_yaw, amcl_yaw):
     """
     Calculate absolute yaw error (angular difference) in degrees.
@@ -44,7 +56,8 @@ def main():
     read_file_percentage = 0.5  # Read 50% of each file
     
     # Path to the folder containing CSV files
-    data_folder = '/home/mircrda/pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl'
+    user_home = os.path.expanduser('~')
+    data_folder = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl')
     
     # Load data using shared function
     print("Loading data...")
@@ -69,7 +82,8 @@ def main():
     has_yaw = 'ground_truth_yaw' in combined_df.columns and 'amcl_yaw' in combined_df.columns
     if not has_yaw:
         print("Warning: Yaw columns not found, yaw error plot will be skipped")
-    
+
+
     # Check if map_integrity_ratio exists
     if 'map_integrity_ratio' not in combined_df.columns:
         print(f"Warning: map_integrity_ratio column not found")
@@ -181,7 +195,7 @@ def main():
     for idx, (file_id, df_file) in enumerate(sorted(file_data.items())):
         ax_top.plot(df_file['time_normalized'], df_file['esi'], 
                alpha=0.3, linewidth=0.8, color=colors[idx % len(colors)],
-               label=f'Run {file_id}' if idx < 10 else None)  # Only label first 10 to avoid clutter
+               label=f'Run 1-30' if idx== 1 else None)  # Only label first 10 to avoid clutter
     
     # Plot mean ESI (thick line)
     if len(mean_esi) > 0:
@@ -195,8 +209,16 @@ def main():
             first_timestamp = df_first['timestamp'].iloc[0]
             df_first['time_normalized'] = df_first['timestamp'] - first_timestamp
             
-            ax_top.plot(df_first['time_normalized'], df_first['map_integrity_ratio'],
-                   color='red', linewidth=2, linestyle='--', label='Map Integrity Ratio', zorder=9)
+            # Update max_time to include first file if needed
+            max_time_first = df_first['time_normalized'].max()
+            max_time = max(max_time, max_time_first)
+            
+            # Apply correction to map_integrity_ratio
+            corrected_mir = correct_map_integrity_ratio(df_first['map_integrity_ratio'])
+            
+            if corrected_mir is not None:
+                ax_top.plot(df_first['time_normalized'], corrected_mir,
+                       color='red', linewidth=2, linestyle='--', label='Map Integrity Ratio', zorder=9)
     
     # Set labels and title for top plot
     ax_top.set_xlabel('Time [s]', fontsize=12)
@@ -204,6 +226,7 @@ def main():
     ax_top.set_title(f'ESI and Map Integrity Ratio over Time\n({N} runs, {read_file_percentage*100:.0f}% of each file)', fontsize=14)
     ax_top.grid(True, alpha=0.3)
     ax_top.legend(loc='best', fontsize=10)
+    ax_top.set_xlim(0, max_time)
     
     # Bottom left: Position error
     ax_pos = fig.add_subplot(gs[1, 0])
@@ -224,12 +247,13 @@ def main():
     if len(interpolated_pos_errors) > 0:
         mean_pos_error = np.mean(interpolated_pos_errors, axis=0)
         ax_pos.plot(common_time, mean_pos_error, 
-                   color='black', linewidth=3, label='Mean', zorder=10)
+                   color='black', linewidth=3, zorder=10)
     
     ax_pos.set_xlabel('Time [s]', fontsize=11)
     ax_pos.set_ylabel('Position Error [m]', fontsize=11)
     ax_pos.set_title('Absolute Position Error', fontsize=12)
     ax_pos.grid(True, alpha=0.3)
+    ax_pos.set_xlim(0, max_time)
     if len(interpolated_pos_errors) > 0:
         ax_pos.legend(loc='best', fontsize=9)
     
@@ -253,12 +277,13 @@ def main():
         if len(interpolated_yaw_errors) > 0:
             mean_yaw_error = np.mean(interpolated_yaw_errors, axis=0)
             ax_yaw.plot(common_time, mean_yaw_error, 
-                       color='black', linewidth=3, label='Mean', zorder=10)
+                       color='black', linewidth=3, zorder=10)
         
         ax_yaw.set_xlabel('Time [s]', fontsize=11)
         ax_yaw.set_ylabel('Yaw Error [deg]', fontsize=11)
         ax_yaw.set_title('Absolute Yaw Error', fontsize=12)
         ax_yaw.grid(True, alpha=0.3)
+        ax_yaw.set_xlim(0, max_time)
         if len(interpolated_yaw_errors) > 0:
             ax_yaw.legend(loc='best', fontsize=9)
     else:
@@ -274,12 +299,30 @@ def main():
     # Show the plot
     plt.show()
     
+    # Calculate average position and yaw errors across all data
+    all_position_errors = []
+    all_yaw_errors = []
+    
+    for file_id, df_file in file_data.items():
+        all_position_errors.extend(df_file['position_error'].values)
+        if has_yaw:
+            all_yaw_errors.extend(df_file['yaw_error'].values)
+    
+    avg_position_error = np.mean(all_position_errors) if len(all_position_errors) > 0 else None
+    avg_yaw_error = np.mean(all_yaw_errors) if len(all_yaw_errors) > 0 else None
+    
     # Print summary statistics
     print("\n" + "="*60)
     print("Summary Statistics:")
     print("="*60)
     print(f"Number of runs: {len(file_data)}")
     print(f"Total data points: {len(combined_df)}")
+    
+    # Print average errors
+    if avg_position_error is not None:
+        print(f"\nAverage Position Error: {avg_position_error:.6f} m")
+    if avg_yaw_error is not None:
+        print(f"Average Yaw Error: {avg_yaw_error:.6f} deg")
     
     if len(mean_esi) > 0:
         print(f"\nMean ESI statistics:")
@@ -289,15 +332,19 @@ def main():
         print(f"  Max: {np.max(mean_esi):.6f}")
     
     if df_first is not None and 'map_integrity_ratio' in df_first.columns:
-        mir_values = df_first['map_integrity_ratio'].dropna()
-        if len(mir_values) > 0:
-            print(f"\nMap Integrity Ratio statistics:")
-            print(f"  Mean: {mir_values.mean():.6f}")
-            print(f"  Std: {mir_values.std():.6f}")
-            print(f"  Min: {mir_values.min():.6f}")
-            print(f"  Max: {mir_values.max():.6f}")
+        # Apply correction to map_integrity_ratio for statistics
+        corrected_mir = correct_map_integrity_ratio(df_first['map_integrity_ratio'])
+        if corrected_mir is not None:
+            mir_values = corrected_mir.dropna()
+            if len(mir_values) > 0:
+                print(f"\nMap Integrity Ratio statistics:")
+                print(f"  Mean: {mir_values.mean():.6f}")
+                print(f"  Std: {mir_values.std():.6f}")
+                print(f"  Min: {mir_values.min():.6f}")
+                print(f"  Max: {mir_values.max():.6f}")
     
     print("="*60)
+
 
 if __name__ == '__main__':
     main()

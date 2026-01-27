@@ -14,8 +14,9 @@ import math
 
 def main():
     # Paths to the CSV files
-    default_csv_path = os.path.expandvars('/home/mircrda/pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl/default_combined_results.csv')
-    tuning_csv_path = os.path.expandvars('/home/${USER}/pCloudDrive/Offline/PhD/Folders/test_data/article_data/alpha_tuning/tuning_combined_results.csv')
+    user_home = os.path.expanduser('~')
+    default_csv_path = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl/default_combined_results.csv')
+    tuning_csv_path = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/alpha_tuning/tuning_combined_results.csv')
     
     # Check if files exist
     if not os.path.exists(default_csv_path):
@@ -117,11 +118,22 @@ def main():
     # Plot each numeric column
     for idx, col in enumerate(numeric_cols):
         ax = axes[idx]
+        # Use correct_map_integrity_ratio if col is map_integrity_ratio
+        col_default = 'correct_map_integrity_ratio' if col == 'map_integrity_ratio' else col
+        col_tuning = 'correct_map_integrity_ratio' if col == 'map_integrity_ratio' else col
+        
+        # Check if the correct column exists, otherwise use original
+        if col == 'map_integrity_ratio':
+            if 'correct_map_integrity_ratio' not in df_default.columns:
+                col_default = col
+            if 'correct_map_integrity_ratio' not in df_tuning.columns:
+                col_tuning = col
+        
         # Plot default data (add 1 to indices to show 1-30 instead of 0-29)
-        ax.plot(row_indices_default + 1, df_default[col], linewidth=2, 
+        ax.plot(row_indices_default + 1, df_default[col_default], linewidth=2, 
                 markersize=6, alpha=0.7, label='Default', color='red')
         # Plot tuning data (add 1 to indices to show 1-30 instead of 0-29)
-        ax.plot(row_indices_tuning + 1, df_tuning[col], linewidth=2, 
+        ax.plot(row_indices_tuning + 1, df_tuning[col_tuning], linewidth=2, 
                 markersize=6, alpha=0.7, label='Tuning', color='blue')
         ax.set_xlabel('Run number', fontsize=10)
         ax.set_ylabel(col, fontsize=10)

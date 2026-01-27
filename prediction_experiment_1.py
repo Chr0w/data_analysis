@@ -9,51 +9,42 @@ import numpy as np
 import os
 import sys
 import random
+import argparse
 from data_loader import load_data, calculate_position_error
 
-def exponential_b_value(esi, a=0.8, k=8.2):
+def calculate_lost_track_probability(esi_values, a=0.8, k=8.2, offset=0.05):
     """
-    Calculate b value using exponential function: b(esi) = a * exp(-k * esi)
+    Calculate probability of lost track using cumulative integral formula:
+    p_lost(esi) = integral(a * exp(-k * esi)) - offset
+    
+    For discrete data, the integral is approximated as a cumulative sum.
     
     Parameters:
     -----------
-    esi : float
-        ESI value
+    esi_values : array-like
+        Array of ESI values
     a : float
         Amplitude parameter (default: 0.8)
     k : float
         Decay rate parameter (default: 8.2)
+    offset : float
+        Offset to subtract from the integral (default: 0.05)
     
     Returns:
     --------
-    b : float
-        The b value for the given ESI
+    p_lost : float
+        Probability of lost track, clamped to [0, 1]
     """
-    return a * np.exp(-k * esi)
-
-def update_lost_track_probability(accumulated_prob, b):
-    """
-    Update the accumulated probability and calculate probability of lost track.
+    # Calculate cumulative integral: sum of a * exp(-k * esi) for all ESI values
+    integral = np.sum(a * np.exp(-k * np.array(esi_values)))
     
-    Parameters:
-    -----------
-    accumulated_prob : float
-        Current accumulated probability of still being on track
-    b : float
-        Probability value for this sample
+    # Subtract offset
+    p_lost = integral - offset
     
-    Returns:
-    --------
-    new_accumulated_prob : float
-        Updated accumulated probability of still being on track
-    probability_of_lost_track : float
-        Probability of being lost (1 - accumulated_prob)
-    """
-    # Normal case: multiply by (1 - b)
-    new_accumulated_prob = accumulated_prob * (1 - b)
+    # Clamp to valid probability range [0, 1]
+    p_lost = max(0.0, min(1.0, p_lost))
     
-    probability_of_lost_track = 1 - new_accumulated_prob
-    return new_accumulated_prob, probability_of_lost_track
+    return p_lost
 
 def get_20_second_window(df_file, timestamp_col='timestamp', target_duration=20.0, tolerance=0.5):
     """
@@ -167,23 +158,16 @@ def process_subsample(df_file, file_id, a=0.8, k=8.2, probability_threshold=0.95
     if not all(col in df_file.columns for col in required_cols):
         return False, False, 0.0, 0.0
     
-    # Initialize accumulated probability (start on track)
-    accumulated_prob = 1.0
-    
     # Track maximum position error
     max_position_error = 0.0
+    
+    # Collect ESI values
+    esi_values = []
     
     # Process each row in the subsample
     for idx, row in df_file.iterrows():
         esi = row['esi']
-        
-        # Calculate b value using exponential function
-        b = exponential_b_value(esi, a=a, k=k)
-        
-        # Update probability
-        accumulated_prob, probability_of_lost_track = update_lost_track_probability(
-            accumulated_prob, b
-        )
+        esi_values.append(esi)
         
         # Calculate position error
         position_error = calculate_position_error(
@@ -192,8 +176,10 @@ def process_subsample(df_file, file_id, a=0.8, k=8.2, probability_threshold=0.95
         )
         max_position_error = max(max_position_error, position_error)
     
+    # Calculate probability of lost track using single formula
+    final_probability = calculate_lost_track_probability(esi_values, a=a, k=k, offset=0.05)
+    
     # Determine if positive (predicted lost track)
-    final_probability = 1.0 - accumulated_prob
     is_predicted_positive = final_probability > probability_threshold
     
     # Determine if actually positive (any position error exceeds threshold)
@@ -291,33 +277,41 @@ def print_confusion_matrix_results(tp, fp, tn, fn):
     
     print("="*60)
 
-def generate_subsamples(file_groups, num_subsamples, seed=None):
+def generate_balanced_subsamples(file_groups, num_lost=50, num_not_lost=50, error_threshold=0.5, seed=None):
     """
-    Generate a fixed set of subsamples.
+    Generate a balanced set of subsamples (50 lost, 50 not lost).
     
     Parameters:
     -----------
     file_groups : dict
         Dictionary of file_id -> dataframe
-    num_subsamples : int
-        Number of subsamples to generate
+    num_lost : int
+        Number of lost track samples to generate (default: 50)
+    num_not_lost : int
+        Number of not lost track samples to generate (default: 50)
+    error_threshold : float
+        Position error threshold in meters to determine if actually lost
     seed : int or None
         Random seed for reproducibility
     
     Returns:
     --------
     subsamples : list
-        List of (file_id, window_df) tuples
+        List of (file_id, window_df) tuples, balanced with num_lost lost and num_not_lost not lost
     """
     if seed is not None:
         random.seed(seed)
         np.random.seed(seed)
     
-    subsamples = []
+    lost_subsamples = []
+    not_lost_subsamples = []
     attempts = 0
-    max_attempts = num_subsamples * 10  # Prevent infinite loop
+    max_attempts = (num_lost + num_not_lost) * 50  # Prevent infinite loop
     
-    while len(subsamples) < num_subsamples and attempts < max_attempts:
+    # Check required columns
+    required_cols = ['ground_truth_x', 'ground_truth_y', 'amcl_x', 'amcl_y']
+    
+    while (len(lost_subsamples) < num_lost or len(not_lost_subsamples) < num_not_lost) and attempts < max_attempts:
         attempts += 1
         
         # Select a random file
@@ -330,7 +324,36 @@ def generate_subsamples(file_groups, num_subsamples, seed=None):
         if window_df is None or len(window_df) < 2:
             continue
         
-        subsamples.append((file_id, window_df))
+        # Check if required columns exist
+        if not all(col in window_df.columns for col in required_cols):
+            continue
+        
+        # Calculate maximum position error to determine if actually lost
+        max_position_error = 0.0
+        for idx, row in window_df.iterrows():
+            position_error = calculate_position_error(
+                row['ground_truth_x'], row['ground_truth_y'],
+                row['amcl_x'], row['amcl_y']
+            )
+            max_position_error = max(max_position_error, position_error)
+        
+        # Classify as lost or not lost
+        is_actually_lost = max_position_error > error_threshold
+        
+        # Add to appropriate list if we still need samples of that type
+        if is_actually_lost and len(lost_subsamples) < num_lost:
+            lost_subsamples.append((file_id, window_df))
+        elif not is_actually_lost and len(not_lost_subsamples) < num_not_lost:
+            not_lost_subsamples.append((file_id, window_df))
+    
+    # Combine balanced sets
+    subsamples = lost_subsamples + not_lost_subsamples
+    
+    # Shuffle to mix lost and not lost samples
+    random.shuffle(subsamples)
+    
+    # Print balance information
+    print(f"  Generated {len(lost_subsamples)} lost and {len(not_lost_subsamples)} not lost samples")
     
     return subsamples
 
@@ -390,7 +413,7 @@ def evaluate_parameters(a, k, subsamples, probability_threshold, error_threshold
     
     return f1_score, tp, fp, tn, fn
 
-def optimize_parameters(training_subsamples, probability_threshold, error_threshold, max_runs=1000):
+def optimize_parameters(training_subsamples, probability_threshold, error_threshold, max_runs=500):
     """
     Optimize parameters a and k to maximize F1 score using training subsamples.
     
@@ -491,16 +514,20 @@ def optimize_parameters(training_subsamples, probability_threshold, error_thresh
     
     return best_params, best_f1, best_confusion
 
-def main():
+def main(optimize=False, lost_percentage=50):
     # Configuration parameters
     N = 30  # Number of files to read (starting with 1)
     M = 20  # Sample every M'th entry
     read_file_percentage = 0.75  # Percentage of files to read
     num_subsamples = 100  # Number of subsamples to generate
     
-    # Exponential function parameters
-    a = 1.0 # 0.8
-    k = 10.5 # 8.2
+    # Calculate number of lost and not lost samples based on percentage
+    num_lost = int(num_subsamples * lost_percentage / 100)
+    num_not_lost = num_subsamples - num_lost
+    
+    # Exponential function parameters default values
+    a = 1.67 # 0.8
+    k = 19.33 # 8.2
     
     # Probability threshold for positive prediction
     probability_threshold = 0.99
@@ -509,7 +536,8 @@ def main():
     error_threshold = 0.5
     
     # Path to the folder containing CSV files
-    data_folder = '/home/mircrda/pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl'
+    user_home = os.path.expanduser('~')
+    data_folder = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl')
     
     # Load data using shared function
     print("Loading data...")
@@ -541,27 +569,37 @@ def main():
         file_groups[file_id] = sampled_df[sampled_df['file_id'] == file_id].copy()
         print(f"File {file_id}: {len(file_groups[file_id])} entries")
     
-    # Generate training subsamples (for optimization)
-    print(f"\nGenerating {num_subsamples} training subsamples...")
-    training_subsamples = generate_subsamples(file_groups, num_subsamples, seed=42)
-    print(f"Generated {len(training_subsamples)} training subsamples")
-    
-    # Optimize parameters using training subsamples
-    best_params, best_f1_train, best_confusion_train = optimize_parameters(
-        training_subsamples, probability_threshold, error_threshold, max_runs=1000
+    # Generate balanced evaluation subsamples
+    print(f"\nGenerating balanced evaluation subsamples ({num_lost} lost, {num_not_lost} not lost, {lost_percentage}% lost)...")
+    evaluation_subsamples = generate_balanced_subsamples(
+        file_groups, num_lost=num_lost, num_not_lost=num_not_lost, error_threshold=error_threshold, seed=123
     )
+    print(f"Generated {len(evaluation_subsamples)} evaluation subsamples (should be {num_subsamples}: {num_lost} lost + {num_not_lost} not lost)")
     
-    # Use best parameters for final evaluation
-    a = best_params['a']
-    k = best_params['k']
-    
-    print(f"\nUsing optimized parameters: a={a:.6f}, k={k:.6f}")
-    print(f"Training F1 score: {best_f1_train:.6f}")
-    
-    # Generate evaluation subsamples (different from training)
-    print(f"\nGenerating {num_subsamples} evaluation subsamples (different from training)...")
-    evaluation_subsamples = generate_subsamples(file_groups, num_subsamples, seed=123)
-    print(f"Generated {len(evaluation_subsamples)} evaluation subsamples")
+    # Optimize parameters if requested
+    best_f1_train = None
+    if optimize:
+        # Generate balanced training subsamples
+        print(f"\nGenerating balanced training subsamples ({num_lost} lost, {num_not_lost} not lost, {lost_percentage}% lost)...")
+        training_subsamples = generate_balanced_subsamples(
+            file_groups, num_lost=num_lost, num_not_lost=num_not_lost, error_threshold=error_threshold, seed=42
+        )
+        print(f"Generated {len(training_subsamples)} training subsamples (should be {num_subsamples}: {num_lost} lost + {num_not_lost} not lost)")
+        
+        # Optimize parameters using training subsamples
+        best_params, best_f1_train, best_confusion_train = optimize_parameters(
+            training_subsamples, probability_threshold, error_threshold, max_runs=500
+        )
+        
+        # Use best parameters for final evaluation
+        a = best_params['a']
+        k = best_params['k']
+        
+        print(f"\nUsing optimized parameters: a={a:.6f}, k={k:.6f}")
+        print(f"Training F1 score: {best_f1_train:.6f}")
+    else:
+        print(f"\nUsing default parameters: a={a:.6f}, k={k:.6f}")
+        print("(Optimization skipped)")
     
     print(f"\nEvaluating on evaluation set...")
     print("=" * 60)
@@ -596,7 +634,8 @@ def main():
     print("EVALUATION RESULTS (on evaluation set)")
     print("=" * 60)
     print(f"Parameters used: a={a:.6f}, k={k:.6f}")
-    print(f"Training F1 score: {best_f1_train:.6f}")
+    if best_f1_train is not None:
+        print(f"Training F1 score: {best_f1_train:.6f}")
     print("=" * 60)
     
     predicted_positive_count = sum(1 for r in results if r['is_predicted_positive'])
@@ -651,5 +690,17 @@ def main():
     print("=" * 60)
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description='Prediction Experiment 1: Test exponential function for lost track prediction.')
+    parser.add_argument('--optimize', action='store_true', 
+                        help='Perform parameter optimization. If not set, uses default values (a=1.67, k=19.33).')
+    parser.add_argument('--lost_percentage', type=int, default=50,
+                        help='Percentage of lost track samples in the dataset (default: 50). Remaining will be not lost samples.')
+    args = parser.parse_args()
+    
+    # Validate lost_percentage
+    if args.lost_percentage < 0 or args.lost_percentage > 100:
+        print(f"Error: lost_percentage must be between 0 and 100, got {args.lost_percentage}")
+        sys.exit(1)
+    
+    main(optimize=args.optimize, lost_percentage=args.lost_percentage)
 
