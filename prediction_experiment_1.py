@@ -4,18 +4,22 @@ Prediction Experiment 1: Test exponential function for lost track prediction.
 Generates 100 subsamples of 20-second windows and predicts lost track using exponential ESI function.
 """
 
+import json
 import pandas as pd
 import numpy as np
 import os
 import sys
 import random
-import argparse
+import threading
 from data_loader import load_data, calculate_position_error
 
-def calculate_lost_track_probability(esi_values, a=0.8, k=8.2, offset=0.05):
+# File to store/load optimized parameters (same directory as this script)
+PARAMS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'optimized_params.json')
+
+def calculate_lost_track_probability(esi_values, a=0.8, b=8.2, c=0.0, d=0.05):
     """
     Calculate probability of lost track using cumulative integral formula:
-    p_lost(esi) = integral(a * exp(-k * esi)) - offset
+    p_lost(esi) = integral(a * exp(-b * esi + c)) - d
     
     For discrete data, the integral is approximated as a cumulative sum.
     
@@ -25,9 +29,11 @@ def calculate_lost_track_probability(esi_values, a=0.8, k=8.2, offset=0.05):
         Array of ESI values
     a : float
         Amplitude parameter (default: 0.8)
-    k : float
+    b : float
         Decay rate parameter (default: 8.2)
-    offset : float
+    c : float
+        Shift parameter (default: 0.0)
+    d : float
         Offset to subtract from the integral (default: 0.05)
     
     Returns:
@@ -35,14 +41,9 @@ def calculate_lost_track_probability(esi_values, a=0.8, k=8.2, offset=0.05):
     p_lost : float
         Probability of lost track, clamped to [0, 1]
     """
-    # Calculate cumulative integral: sum of a * exp(-k * esi) for all ESI values
-    integral = np.sum(a * np.exp(-k * np.array(esi_values)))
-    
-    # Subtract offset
-    p_lost = integral - offset
-    
+    # Calculate cumulative integral: sum of a * exp(-b * esi + c) for all ESI values
     # Clamp to valid probability range [0, 1]
-    p_lost = max(0.0, min(1.0, p_lost))
+    p_lost = max(0.0, min(1.0, np.sum(a * np.exp(-b * np.array(esi_values) + c)) - d))
     
     return p_lost
 
@@ -120,7 +121,7 @@ def get_20_second_window(df_file, timestamp_col='timestamp', target_duration=20.
     
     return window_df
 
-def process_subsample(df_file, file_id, a=0.8, k=8.2, probability_threshold=0.95, error_threshold=0.5):
+def process_subsample(df_file, file_id, a=0.8, b=8.2, c=0.0, d=0.05, probability_threshold=0.95, error_threshold=0.5):
     """
     Process a single subsample and determine if it's predicted as lost track and actually lost track.
     
@@ -132,8 +133,12 @@ def process_subsample(df_file, file_id, a=0.8, k=8.2, probability_threshold=0.95
         File ID for tracking
     a : float
         Exponential function amplitude
-    k : float
+    b : float
         Exponential function decay rate
+    c : float
+        Shift parameter
+    d : float
+        Offset to subtract from the integral (default: 0.05)
     probability_threshold : float
         Threshold for positive prediction (default: 0.95)
     error_threshold : float
@@ -177,7 +182,7 @@ def process_subsample(df_file, file_id, a=0.8, k=8.2, probability_threshold=0.95
         max_position_error = max(max_position_error, position_error)
     
     # Calculate probability of lost track using single formula
-    final_probability = calculate_lost_track_probability(esi_values, a=a, k=k, offset=0.05)
+    final_probability = calculate_lost_track_probability(esi_values, a=a, b=b, c=c, d=d)
     
     # Determine if positive (predicted lost track)
     is_predicted_positive = final_probability > probability_threshold
@@ -357,16 +362,20 @@ def generate_balanced_subsamples(file_groups, num_lost=50, num_not_lost=50, erro
     
     return subsamples
 
-def evaluate_parameters(a, k, subsamples, probability_threshold, error_threshold):
+def evaluate_parameters(a, b, c, d, subsamples, probability_threshold, error_threshold):
     """
-    Evaluate parameters a and k using pre-generated subsamples.
+    Evaluate parameters a, b, c, and d using pre-generated subsamples.
     
     Parameters:
     -----------
     a : float
         Exponential function amplitude
-    k : float
+    b : float
         Exponential function decay rate
+    c : float
+        Shift parameter
+    d : float
+        Offset to subtract from the integral
     subsamples : list
         List of (file_id, window_df) tuples
     probability_threshold : float
@@ -386,7 +395,7 @@ def evaluate_parameters(a, k, subsamples, probability_threshold, error_threshold
     for file_id, window_df in subsamples:
         # Process the subsample
         is_predicted_positive, is_actually_positive, _, _ = process_subsample(
-            window_df, file_id, a=a, k=k, 
+            window_df, file_id, a=a, b=b, c=c, d=d,
             probability_threshold=probability_threshold, 
             error_threshold=error_threshold
         )
@@ -415,7 +424,7 @@ def evaluate_parameters(a, k, subsamples, probability_threshold, error_threshold
 
 def optimize_parameters(training_subsamples, probability_threshold, error_threshold, max_runs=500):
     """
-    Optimize parameters a and k to maximize F1 score using training subsamples.
+    Optimize parameters a, b, c, and d to maximize F1 score using training subsamples.
     
     Parameters:
     -----------
@@ -440,81 +449,118 @@ def optimize_parameters(training_subsamples, probability_threshold, error_thresh
     print("\n" + "=" * 60)
     print("PARAMETER OPTIMIZATION")
     print("=" * 60)
-    print(f"Optimizing a and k to maximize F1 score")
+    print(f"Optimizing a, b, c, and d to maximize F1 score")
     print(f"Max evaluations: {max_runs}")
-    print(f"Parameter bounds: a in [0.1, 2.0], k in [1.0, 20.0]")
+    print(f"Parameter bounds: a in [0.3, 10.0], b in [4.0, 50.0], c in [-2.0, 2.0], d in [0.005, 0.05]")
+    print("Press Enter to stop optimization early")
     print("=" * 60)
+    
+    # Flag to signal early stop
+    stop_optimization = threading.Event()
+    
+    def wait_for_enter():
+        """Background thread function to wait for Enter key"""
+        try:
+            input()  # Wait for Enter
+            stop_optimization.set()
+            print("\n*** Optimization stopped by user ***")
+        except:
+            pass  # Ignore errors (e.g., if stdin is closed)
+    
+    # Start background thread to monitor for Enter
+    input_thread = threading.Thread(target=wait_for_enter, daemon=True)
+    input_thread.start()
     
     # Track evaluations
     evaluation_count = 0
     best_f1 = -1.0
     best_params = None
     best_confusion = None
+    best_run = None
     
-    # Start with a coarse grid search
+    # Start with a coarse grid search (reduced grid size for 4D search)
     print("Phase 1: Coarse grid search...")
-    a_values = np.linspace(0.1, 2.0, 10)
-    k_values = np.linspace(1.0, 20.0, 10)
-    grid_evaluations = len(a_values) * len(k_values)
+    a_values = np.linspace(0.3, 10.0, 6)
+    b_values = np.linspace(4.0, 50.0, 6)
+    c_values = np.linspace(-2.0, 2.0, 5)
+    d_values = np.linspace(0.005, 0.05, 5)
+    grid_evaluations = len(a_values) * len(b_values) * len(c_values) * len(d_values)
     
     if grid_evaluations <= max_runs:
         for a in a_values:
-            for k in k_values:
-                if evaluation_count >= max_runs:
+            for b in b_values:
+                for c in c_values:
+                    for d in d_values:
+                        if evaluation_count >= max_runs or stop_optimization.is_set():
+                            break
+                        evaluation_count += 1
+                        f1_score, tp, fp, tn, fn = evaluate_parameters(
+                            a, b, c, d, training_subsamples, probability_threshold, error_threshold
+                        )
+                        
+                        if f1_score > best_f1:
+                            best_f1 = f1_score
+                            best_params = {'a': a, 'b': b, 'c': c, 'd': d}
+                            best_confusion = (tp, fp, tn, fn)
+                            best_run = evaluation_count
+                            print(f"  *** NEW BEST at Run {evaluation_count:4d}: a={a:.4f}, b={b:.4f}, c={c:.4f}, d={d:.4f}, F1={f1_score:.4f} ***")
+                        
+                        if evaluation_count % 20 == 0 or evaluation_count == 1:
+                            print(f"Run {evaluation_count:4d}: a={a:.4f}, b={b:.4f}, c={c:.4f}, d={d:.4f}, F1={f1_score:.4f} (Best: {best_f1:.4f})")
+                    if evaluation_count >= max_runs or stop_optimization.is_set():
+                        break
+                if evaluation_count >= max_runs or stop_optimization.is_set():
                     break
-                evaluation_count += 1
-                f1_score, tp, fp, tn, fn = evaluate_parameters(
-                    a, k, training_subsamples, probability_threshold, error_threshold
-                )
-                
-                if f1_score > best_f1:
-                    best_f1 = f1_score
-                    best_params = {'a': a, 'k': k}
-                    best_confusion = (tp, fp, tn, fn)
-                
-                if evaluation_count % 10 == 0 or evaluation_count == 1:
-                    print(f"Run {evaluation_count:4d}: a={a:.4f}, k={k:.4f}, F1={f1_score:.4f} (Best: {best_f1:.4f})")
-            if evaluation_count >= max_runs:
+            if evaluation_count >= max_runs or stop_optimization.is_set():
                 break
     
     # Then do random search with remaining evaluations
     remaining_runs = max_runs - evaluation_count
-    if remaining_runs > 0:
+    if remaining_runs > 0 and not stop_optimization.is_set():
         print(f"\nPerforming random search with {remaining_runs} remaining evaluations...")
         for i in range(remaining_runs):
-            a = np.random.uniform(0.1, 2.0)
-            k = np.random.uniform(1.0, 20.0)
+            if stop_optimization.is_set():
+                break
+            a = np.random.uniform(0.3, 10.0)
+            b = np.random.uniform(4.0, 50.0)
+            c = np.random.uniform(-2.0, 2.0)
+            d = np.random.uniform(0.005, 0.05)
             f1_score, tp, fp, tn, fn = evaluate_parameters(
-                a, k, training_subsamples, probability_threshold, error_threshold
+                a, b, c, d, training_subsamples, probability_threshold, error_threshold
             )
             evaluation_count += 1
             
             if f1_score > best_f1:
                 best_f1 = f1_score
-                best_params = {'a': a, 'k': k}
+                best_params = {'a': a, 'b': b, 'c': c, 'd': d}
                 best_confusion = (tp, fp, tn, fn)
+                best_run = evaluation_count
+                print(f"  *** NEW BEST at Run {evaluation_count:4d}: a={a:.4f}, b={b:.4f}, c={c:.4f}, d={d:.4f}, F1={f1_score:.4f} ***")
             
-            if evaluation_count % 10 == 0:
-                print(f"Run {evaluation_count:4d}: a={a:.4f}, k={k:.4f}, F1={f1_score:.4f} (Best: {best_f1:.4f})")
+            if evaluation_count % 20 == 0:
+                print(f"Run {evaluation_count:4d}: a={a:.4f}, b={b:.4f}, c={c:.4f}, d={d:.4f}, F1={f1_score:.4f} (Best: {best_f1:.4f})")
     
     print("\n" + "=" * 60)
-    print("OPTIMIZATION COMPLETE")
+    if stop_optimization.is_set():
+        print("OPTIMIZATION STOPPED EARLY")
+    else:
+        print("OPTIMIZATION COMPLETE")
     print("=" * 60)
     print(f"Total evaluations: {evaluation_count}")
     if best_params:
-        print(f"Best parameters: a={best_params['a']:.6f}, k={best_params['k']:.6f}")
+        print(f"Best parameters: a={best_params['a']:.6f}, b={best_params['b']:.6f}, c={best_params['c']:.6f}, d={best_params['d']:.6f}")
         print(f"Best F1 score: {best_f1:.6f}")
+        if best_run is not None:
+            print(f"Found at Run {best_run}")
         if best_confusion:
             tp, fp, tn, fn = best_confusion
-            print(f"\nConfusion matrix at best parameters:")
-            print(f"  TP: {tp}, FP: {fp}, TN: {tn}, FN: {fn}")
     else:
         print("Warning: No valid parameters found")
     print("=" * 60)
     
     return best_params, best_f1, best_confusion
 
-def main(optimize=False, lost_percentage=50):
+def main(optimize=False, training_lost_percentage=50, validation_lost_percentage=50):
     # Configuration parameters
     N = 30  # Number of files to read (starting with 1)
     M = 20  # Sample every M'th entry
@@ -522,15 +568,29 @@ def main(optimize=False, lost_percentage=50):
     num_subsamples = 100  # Number of subsamples to generate
     
     # Calculate number of lost and not lost samples based on percentage
-    num_lost = int(num_subsamples * lost_percentage / 100)
+    # Use validation percentage for evaluation subsamples
+    num_lost = int(num_subsamples * validation_lost_percentage / 100)
     num_not_lost = num_subsamples - num_lost
     
-    # Exponential function parameters default values
-    a = 1.67 # 0.8
-    k = 19.33 # 8.2
+    # Exponential function parameters: load from file when not optimizing, else use defaults
+    a, b, c, d = 1.67, 19.33, 0.0, 0.05
+    if not optimize:
+        if os.path.isfile(PARAMS_FILE):
+            try:
+                with open(PARAMS_FILE, 'r') as f:
+                    params = json.load(f)
+                a = float(params.get('a', a))
+                b = float(params.get('b', b))
+                c = float(params.get('c', c))
+                d = float(params.get('d', d))
+                print(f"Loaded parameters from {PARAMS_FILE}: a={a:.6f}, b={b:.6f}, c={c:.6f}, d={d:.6f}")
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                print(f"Warning: Could not load parameters from {PARAMS_FILE}: {e}. Using defaults.")
+        else:
+            print(f"No parameter file found at {PARAMS_FILE}. Using default parameters.")
     
     # Probability threshold for positive prediction
-    probability_threshold = 0.99
+    probability_threshold = 0.999
     
     # Position error threshold for actual lost track (in meters)
     error_threshold = 0.5
@@ -570,7 +630,7 @@ def main(optimize=False, lost_percentage=50):
         print(f"File {file_id}: {len(file_groups[file_id])} entries")
     
     # Generate balanced evaluation subsamples
-    print(f"\nGenerating balanced evaluation subsamples ({num_lost} lost, {num_not_lost} not lost, {lost_percentage}% lost)...")
+    print(f"\nGenerating balanced evaluation subsamples ({num_lost} lost, {num_not_lost} not lost, {validation_lost_percentage}% lost)...")
     evaluation_subsamples = generate_balanced_subsamples(
         file_groups, num_lost=num_lost, num_not_lost=num_not_lost, error_threshold=error_threshold, seed=123
     )
@@ -579,12 +639,16 @@ def main(optimize=False, lost_percentage=50):
     # Optimize parameters if requested
     best_f1_train = None
     if optimize:
+        # Calculate number of lost and not lost samples for training based on training percentage
+        num_lost_train = int(num_subsamples * training_lost_percentage / 100)
+        num_not_lost_train = num_subsamples - num_lost_train
+        
         # Generate balanced training subsamples
-        print(f"\nGenerating balanced training subsamples ({num_lost} lost, {num_not_lost} not lost, {lost_percentage}% lost)...")
+        print(f"\nGenerating balanced training subsamples ({num_lost_train} lost, {num_not_lost_train} not lost, {training_lost_percentage}% lost)...")
         training_subsamples = generate_balanced_subsamples(
-            file_groups, num_lost=num_lost, num_not_lost=num_not_lost, error_threshold=error_threshold, seed=42
+            file_groups, num_lost=num_lost_train, num_not_lost=num_not_lost_train, error_threshold=error_threshold, seed=42
         )
-        print(f"Generated {len(training_subsamples)} training subsamples (should be {num_subsamples}: {num_lost} lost + {num_not_lost} not lost)")
+        print(f"Generated {len(training_subsamples)} training subsamples (should be {num_subsamples}: {num_lost_train} lost + {num_not_lost_train} not lost)")
         
         # Optimize parameters using training subsamples
         best_params, best_f1_train, best_confusion_train = optimize_parameters(
@@ -592,16 +656,36 @@ def main(optimize=False, lost_percentage=50):
         )
         
         # Use best parameters for final evaluation
-        a = best_params['a']
-        k = best_params['k']
+        if 'd' not in best_params:
+            print("Warning: 'd' not found in best_params, using default 0.05")
+            d = 0.05
+        else:
+            d = best_params['d']
         
-        print(f"\nUsing optimized parameters: a={a:.6f}, k={k:.6f}")
+        if 'c' not in best_params:
+            print("Warning: 'c' not found in best_params, using default 0.0")
+            c = 0.0
+        else:
+            c = best_params['c']
+        
+        a = best_params['a']
+        b = best_params['b']
+        
+        # Save best parameters to file (overwrite)
+        if best_params is not None:
+            with open(PARAMS_FILE, 'w') as f:
+                json.dump({'a': a, 'b': b, 'c': c, 'd': d}, f, indent=2)
+            print(f"Saved optimized parameters to {PARAMS_FILE}")
+        
+        print(f"\nUsing optimized parameters: a={a:.6f}, b={b:.6f}, c={c:.6f}, d={d:.6f}")
         print(f"Training F1 score: {best_f1_train:.6f}")
     else:
-        print(f"\nUsing default parameters: a={a:.6f}, k={k:.6f}")
+        print(f"\nUsing parameters: a={a:.6f}, b={b:.6f}, c={c:.6f}, d={d:.6f}")
         print("(Optimization skipped)")
     
     print(f"\nEvaluating on evaluation set...")
+    print("=" * 60)
+    print(f"Using parameters for validation: a={a:.6f}, b={b:.6f}, c={c:.6f}, d={d:.6f}")
     print("=" * 60)
     
     # Evaluate on evaluation subsamples
@@ -609,7 +693,7 @@ def main(optimize=False, lost_percentage=50):
     for file_id, window_df in evaluation_subsamples:
         # Process the subsample
         is_predicted_positive, is_actually_positive, final_probability, max_position_error = process_subsample(
-            window_df, file_id, a=a, k=k, probability_threshold=probability_threshold, error_threshold=error_threshold
+            window_df, file_id, a=a, b=b, c=c, d=d, probability_threshold=probability_threshold, error_threshold=error_threshold
         )
         
         results.append({
@@ -633,7 +717,7 @@ def main(optimize=False, lost_percentage=50):
     print("\n" + "=" * 60)
     print("EVALUATION RESULTS (on evaluation set)")
     print("=" * 60)
-    print(f"Parameters used: a={a:.6f}, k={k:.6f}")
+    print(f"Parameters used: a={a:.6f}, b={b:.6f}, c={c:.6f}, d={d:.6f}")
     if best_f1_train is not None:
         print(f"Training F1 score: {best_f1_train:.6f}")
     print("=" * 60)
@@ -654,15 +738,6 @@ def main(optimize=False, lost_percentage=50):
     # Print confusion matrix
     print_confusion_matrix_results(tp, fp, tn, fn)
     
-    print("\n" + "-" * 60)
-    print("Probability Statistics:")
-    print("-" * 60)
-    probabilities = [r['probability'] for r in results]
-    print(f"Mean probability: {np.mean(probabilities):.6f}")
-    print(f"Median probability: {np.median(probabilities):.6f}")
-    print(f"Min probability: {np.min(probabilities):.6f}")
-    print(f"Max probability: {np.max(probabilities):.6f}")
-    print(f"Std deviation: {np.std(probabilities):.6f}")
     
     print("\n" + "-" * 60)
     print("Position Error Statistics:")
@@ -674,33 +749,50 @@ def main(optimize=False, lost_percentage=50):
     print(f"Max max error: {np.max(max_errors):.6f} m")
     print(f"Std deviation: {np.std(max_errors):.6f} m")
     
-    print("\n" + "-" * 60)
-    print("Subsample Details (first 20):")
-    print("-" * 60)
-    print(f"{'File ID':<10} {'Entries':<10} {'Pred':<6} {'Actual':<6} {'Prob':<12} {'Max Err':<10}")
-    print("-" * 60)
-    for i, r in enumerate(results[:20]):
-        pred_str = "Yes" if r['is_predicted_positive'] else "No"
-        actual_str = "Yes" if r['is_actually_positive'] else "No"
-        print(f"{r['file_id']:<10} {r['num_entries']:<10} {pred_str:<6} {actual_str:<6} {r['probability']:<12.6f} {r['max_position_error']:<10.6f}")
-    
-    if len(results) > 20:
-        print(f"... and {len(results) - 20} more subsamples")
     
     print("=" * 60)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Prediction Experiment 1: Test exponential function for lost track prediction.')
-    parser.add_argument('--optimize', action='store_true', 
-                        help='Perform parameter optimization. If not set, uses default values (a=1.67, k=19.33).')
-    parser.add_argument('--lost_percentage', type=int, default=50,
-                        help='Percentage of lost track samples in the dataset (default: 50). Remaining will be not lost samples.')
-    args = parser.parse_args()
+    # Prompt user for optimization
+    print("=" * 60)
+    print("Prediction Experiment 1: Lost Track Prediction")
+    print("=" * 60)
+    optimize_input = input("Perform optimization? (y + enter if yes, just enter if no): ").strip().lower()
+    optimize = optimize_input == 'y' or optimize_input == 'yes'
     
-    # Validate lost_percentage
-    if args.lost_percentage < 0 or args.lost_percentage > 100:
-        print(f"Error: lost_percentage must be between 0 and 100, got {args.lost_percentage}")
-        sys.exit(1)
+    training_lost_percentage = 50  # Default value
+    validation_lost_percentage = 50  # Default value
     
-    main(optimize=args.optimize, lost_percentage=args.lost_percentage)
+    # Always ask for validation set balance (used for evaluation subsamples)
+    while True:
+        try:
+            validation_input = input("Enter percentage of lost for validation data (0-100): ").strip()
+            if validation_input:
+                validation_lost_percentage = int(validation_input)
+                if 0 <= validation_lost_percentage <= 100:
+                    break
+                else:
+                    print("Error: Percentage must be between 0 and 100. Please try again.")
+            else:
+                print("Error: Please enter a value. Please try again.")
+        except ValueError:
+            print("Error: Please enter a valid integer. Please try again.")
+    
+    if optimize:
+        # Prompt for training lost percentage (only when optimizing)
+        while True:
+            try:
+                training_input = input("Enter percentage of lost for training data (0-100): ").strip()
+                if training_input:
+                    training_lost_percentage = int(training_input)
+                    if 0 <= training_lost_percentage <= 100:
+                        break
+                    else:
+                        print("Error: Percentage must be between 0 and 100. Please try again.")
+                else:
+                    print("Error: Please enter a value. Please try again.")
+            except ValueError:
+                print("Error: Please enter a valid integer. Please try again.")
+    
+    main(optimize=optimize, training_lost_percentage=training_lost_percentage, validation_lost_percentage=validation_lost_percentage)
 
