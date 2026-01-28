@@ -564,7 +564,7 @@ def main(optimize=False, training_lost_percentage=50, validation_lost_percentage
     # Configuration parameters
     N = 30  # Number of files to read (starting with 1)
     M = 20  # Sample every M'th entry
-    read_file_percentage = 0.75  # Percentage of files to read
+    read_file_percentage = 0.6  # Percentage of files to read
     num_subsamples = 100  # Number of subsamples to generate
     
     # Calculate number of lost and not lost samples based on percentage
@@ -605,7 +605,7 @@ def main(optimize=False, training_lost_percentage=50, validation_lost_percentage
         data_folder, 
         N, 
         mode='percentage',
-        error_threshold=0.30,  # Not used in percentage mode
+        error_threshold=error_threshold,  # Not used in percentage mode
         read_file_percentage=read_file_percentage
     )
     
@@ -652,7 +652,7 @@ def main(optimize=False, training_lost_percentage=50, validation_lost_percentage
         
         # Optimize parameters using training subsamples
         best_params, best_f1_train, best_confusion_train = optimize_parameters(
-            training_subsamples, probability_threshold, error_threshold, max_runs=500
+            training_subsamples, probability_threshold, error_threshold, max_runs=1000
         )
         
         # Use best parameters for final evaluation

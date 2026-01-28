@@ -53,7 +53,7 @@ def calculate_yaw_error(gt_yaw, amcl_yaw):
 def main():
     # Configuration parameters
     N = 30  # Number of files to read (all 30 runs)
-    read_file_percentage = 0.5  # Read 50% of each file
+    read_file_percentage = 1.0  # Read 50% of each file
     
     # Path to the folder containing CSV files
     user_home = os.path.expanduser('~')
