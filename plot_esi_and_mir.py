@@ -153,6 +153,21 @@ def main():
             all_esi_values.append(df_file['esi'].values)
             all_timestamps.append(df_file['time_normalized'].values)
     
+    # Last absolute position error per run (sorted by error ascending)
+    last_position_errors = []
+    for file_id in sorted(file_data.keys()):
+        df_file = file_data[file_id]
+        if len(df_file) > 0:
+            last_err = df_file['position_error'].iloc[-1]
+            last_position_errors.append((file_id, last_err))
+    last_position_errors.sort(key=lambda x: x[1])
+    print("\n" + "="*60)
+    print("Last absolute position error per run (sorted by error, ascending):")
+    print("="*60)
+    for file_id, err in last_position_errors:
+        print(f"  Run {file_id:2d}: {err:.6f} m")
+    print("="*60)
+
     # Calculate mean ESI across all files
     # Need to interpolate to common time points for averaging
     print("Calculating mean ESI...")
@@ -185,7 +200,19 @@ def main():
     # Create the plot with subplots
     print("Creating plot...")
     fig = plt.figure(figsize=(14, 12))
-    gs = gridspec.GridSpec(2, 2, height_ratios=[2, 1], hspace=0.3, wspace=0.3)
+    gs = gridspec.GridSpec(2, 2, figure=fig, height_ratios=[2, 1], hspace=0.3, wspace=0.3)
+    
+    # Sync figure subplotpars with GridSpec so toolbar "Configure subplots" can adjust wspace/hspace
+    fig.subplots_adjust(left=gs.left, right=gs.right, bottom=gs.bottom, top=gs.top,
+                        wspace=gs.wspace, hspace=gs.hspace)
+    
+    def _sync_gridspec_to_subplotpars(event):
+        if event.canvas.figure is fig:
+            gs.update(left=fig.subplotpars.left, right=fig.subplotpars.right,
+                      bottom=fig.subplotpars.bottom, top=fig.subplotpars.top,
+                      wspace=fig.subplotpars.wspace, hspace=fig.subplotpars.hspace)
+    
+    fig.canvas.mpl_connect('draw_event', _sync_gridspec_to_subplotpars)
     
     # Top plot: ESI and MIR (spans both columns)
     ax_top = fig.add_subplot(gs[0, :])

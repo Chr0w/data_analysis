@@ -45,8 +45,8 @@ def main():
     numeric_cols_default = df_default.select_dtypes(include=[np.number]).columns.tolist()
     numeric_cols_tuning = df_tuning.select_dtypes(include=[np.number]).columns.tolist()
     
-    # Columns to exclude
-    exclude_cols = ['timestamp', 'total_messages', 'duration_s', 'msg_rate_hz', 'ESI_range', 'ESI_std_dev', 'mean_ESI', 'position_max_error', 'yaw_max_error', 'position_mean_error', 'yaw_mean_error', 'sum_cov_trace']
+    # Columns to exclude (including std deviation - only plot RMSE)
+    exclude_cols = ['timestamp', 'total_messages', 'duration_s', 'msg_rate_hz', 'ESI_range', 'ESI_std_dev', 'mean_ESI', 'position_max_error', 'yaw_max_error', 'position_mean_error', 'yaw_mean_error', 'sum_cov_trace', 'position_std_dev', 'yaw_std_dev']
     numeric_cols_default = [col for col in numeric_cols_default if col not in exclude_cols]
     numeric_cols_tuning = [col for col in numeric_cols_tuning if col not in exclude_cols]
     
@@ -57,7 +57,7 @@ def main():
         print("Error: No common numeric columns found to plot")
         sys.exit(1)
     
-    # Sort columns for consistent ordering
+    # Sort columns for consistent ordering (position_RMSE first, then yaw_RMSE)
     numeric_cols = sorted(numeric_cols)
     
     print(f"Plotting {len(numeric_cols)} common numeric columns: {numeric_cols}")
@@ -94,22 +94,19 @@ def main():
     
     print("="*60 + "\n")
     
-    # Calculate grid size for subplots
+    # Calculate grid size for subplots (RMSE side by side: 1 row, 2 cols)
     n_cols = len(numeric_cols)
-    n_rows = math.ceil(math.sqrt(n_cols))
-    n_cols_grid = math.ceil(n_cols / n_rows)
+    n_rows = 1
+    n_cols_grid = n_cols
+    if n_cols_grid < 1:
+        n_cols_grid = 1
     
     # Create figure with subplots
     fig, axes = plt.subplots(n_rows, n_cols_grid, figsize=(5*n_cols_grid, 4*n_rows))
     # fig.suptitle('Line Plots: Default vs Tuning Comparison', fontsize=16, y=0.995)
     
     # Flatten axes array if needed
-    if n_cols == 1:
-        axes = [axes]
-    elif n_rows == 1:
-        axes = axes if isinstance(axes, list) else [axes]
-    else:
-        axes = axes.flatten()
+    axes = np.atleast_1d(axes).flatten()
     
     # Create row indices for both dataframes
     row_indices_default = df_default.index.values
@@ -135,35 +132,40 @@ def main():
         # Plot tuning data (add 1 to indices to show 1-30 instead of 0-29)
         ax.plot(row_indices_tuning + 1, df_tuning[col_tuning], linewidth=2, 
                 markersize=6, alpha=0.7, label='Tuning', color='blue')
-        ax.set_xlabel('Run number', fontsize=10)
-        ax.set_ylabel(col, fontsize=10)
+        # Add horizontal lines for mean values
+        mean_default = df_default[col_default].mean()
+        mean_tuning = df_tuning[col_tuning].mean()
+        ax.axhline(mean_default, color='red', linestyle='--', linewidth=1.5, alpha=0.8, label=f'Default mean ({mean_default:.4g})')
+        ax.axhline(mean_tuning, color='blue', linestyle='--', linewidth=1.5, alpha=0.8, label=f'Tuning mean ({mean_tuning:.4g})')
+        ax.set_xlabel('Run number', fontsize=15)
+        ax.set_ylabel(col, fontsize=15)
         
         # Add units to title based on column name
         title = col
         if 'position' in col.lower() and 'rmse' in col.lower():
             title = f"Position RMSE [m]"
-            ax.text(0.30, 0.96, title, transform=ax.transAxes, fontsize=11, 
+            ax.text(0.30, 0.96, title, transform=ax.transAxes, fontsize=17, 
             fontweight='bold', verticalalignment='top', 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
         elif 'yaw' in col.lower() and 'rmse' in col.lower():
             title = f"Yaw RMSE [deg]"
-            ax.text(0.30, 0.96, title, transform=ax.transAxes, fontsize=11, 
+            ax.text(0.30, 0.96, title, transform=ax.transAxes, fontsize=17, 
             fontweight='bold', verticalalignment='top', 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
         elif 'position_std_dev' in col.lower():
             title = f"Position std deviation [m]"
-            ax.text(0.25, 0.96, title, transform=ax.transAxes, fontsize=11, 
+            ax.text(0.25, 0.96, title, transform=ax.transAxes, fontsize=17, 
             fontweight='bold', verticalalignment='top', 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
         elif 'yaw_std_dev' in col.lower():
             title = f"Yaw std deviation [deg]"
-            ax.text(0.20, 0.96, title, transform=ax.transAxes, fontsize=11, 
+            ax.text(0.20, 0.96, title, transform=ax.transAxes, fontsize=17, 
             fontweight='bold', verticalalignment='top', 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
         
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=9)
+        ax.legend(fontsize=14, loc='upper right')
         # Set x-ticks to show specific values: 1, 5, 10, 15, 20, 25, 30
         x_ticks = [1, 5, 10, 15, 20, 25, 30]
         ax.set_xticks(x_ticks)
@@ -188,7 +190,7 @@ def main():
        'yaw_RMSE' in df_default.columns and 'yaw_RMSE' in df_tuning.columns:
         
         fig_hist, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-        fig_hist.suptitle('RMSE Histograms: Default vs Tuning', fontsize=16, y=1.0)
+        fig_hist.suptitle('RMSE Histograms: Default vs Tuning', fontsize=24, y=1.0)
         
         # Calculate shared bin edges for Position RMSE
         pos_rmse_min = min(df_default['position_RMSE'].min(), df_tuning['position_RMSE'].min())
@@ -206,10 +208,10 @@ def main():
                 alpha=0.7, label='Default', color='blue', edgecolor='black', linewidth=1.2)
         ax1.bar(bin_centers_pos + bin_width_pos/4, counts_tuning_pos, width=bin_width_pos/2, 
                 alpha=0.7, label='Tuning', color='red', edgecolor='black', linewidth=1.2)
-        ax1.set_xlabel('Position RMSE [m]', fontsize=12)
-        ax1.set_ylabel('Frequency', fontsize=12)
-        ax1.set_title('Position RMSE Distribution [m]', fontsize=13, fontweight='bold')
-        ax1.legend(fontsize=10)
+        ax1.set_xlabel('Position RMSE [m]', fontsize=18)
+        ax1.set_ylabel('Frequency', fontsize=18)
+        ax1.set_title('Position RMSE Distribution [m]', fontsize=20, fontweight='bold')
+        ax1.legend(fontsize=15, loc='upper right')
         ax1.grid(True, alpha=0.3, axis='y')
         
         # Calculate shared bin edges for Yaw RMSE
@@ -228,10 +230,10 @@ def main():
                 alpha=0.7, label='Default', color='blue', edgecolor='black', linewidth=1.2)
         ax2.bar(bin_centers_yaw + bin_width_yaw/4, counts_tuning_yaw, width=bin_width_yaw/2, 
                 alpha=0.7, label='Tuning', color='red', edgecolor='black', linewidth=1.2)
-        ax2.set_xlabel('Yaw RMSE [deg]', fontsize=12)
-        ax2.set_ylabel('Frequency', fontsize=12)
-        ax2.set_title('Yaw RMSE Distribution [deg]', fontsize=13, fontweight='bold')
-        ax2.legend(fontsize=10)
+        ax2.set_xlabel('Yaw RMSE [deg]', fontsize=18)
+        ax2.set_ylabel('Frequency', fontsize=18)
+        ax2.set_title('Yaw RMSE Distribution [deg]', fontsize=20, fontweight='bold')
+        ax2.legend(fontsize=15, loc='upper right')
         ax2.grid(True, alpha=0.3, axis='y')
         
         plt.tight_layout()
