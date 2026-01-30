@@ -13,9 +13,11 @@ RMSE_PATH = os.path.join(DATA_DIR, 'rmse.txt')
 
 try:
     from scipy.stats import spearmanr as scipy_spearmanr
+    from scipy.stats import norm
     HAS_SCIPY = True
 except ImportError:
     HAS_SCIPY = False
+    norm = None
 
 
 def spearmanr_numpy(x, y):
@@ -60,7 +62,16 @@ def main():
     print(f"  Correlation (rho): {rho:.6f}")
     if p_value is not None:
         if p_value == 0.0 or p_value < 1e-300:
-            print(f"  p-value:           < 1e-300 (effectively zero)")
+            # Underflow: compute approximate p in log-space (asymptotic normal for Spearman)
+            # z = rho * sqrt(n-1) ~ N(0,1) under H0; two-tailed p = 2 * norm.sf(|z|)
+            if HAS_SCIPY and norm is not None and len(esi) > 2:
+                z = abs(rho) * np.sqrt(len(esi) - 1)
+                log_p = np.log(2) + norm.logsf(z)
+                log10_p = log_p / np.log(10)
+                # Report in scientific notation for article: p ≈ 10^{exponent}
+                print(f"  p-value:           ≈ 10^{log10_p:.2f}  (two-tailed, asymptotic)")
+            else:
+                print(f"  p-value:           < 1e-300 (effectively zero)")
         else:
             print(f"  p-value:           {p_value:.4e}")
     print(f"  Number of pairs:   {len(esi)}")
