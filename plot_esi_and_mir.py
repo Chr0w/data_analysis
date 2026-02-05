@@ -7,6 +7,7 @@ Plots ESI for all 30 runs, map_integrity_ratio from first file, and mean ESI.
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+from matplotlib.widgets import Slider
 import numpy as np
 import os
 import sys
@@ -245,7 +246,7 @@ def main():
             
             if corrected_mir is not None:
                 ax_top.plot(df_first['time_normalized'], corrected_mir,
-                       color='red', linewidth=2, linestyle='--', label='Map Integrity Ratio', zorder=9)
+                       color='red', linewidth=3, linestyle='--', label='Map Integrity Ratio', zorder=9)
     
     # Set labels and title for top plot
     ax_top.set_xlabel('Time [s]', fontsize=12)
@@ -273,8 +274,8 @@ def main():
     
     if len(interpolated_pos_errors) > 0:
         mean_pos_error = np.mean(interpolated_pos_errors, axis=0)
-        ax_pos.plot(common_time, mean_pos_error, 
-                   color='black', linewidth=3, zorder=10)
+        ax_pos.plot(common_time, mean_pos_error,
+                   color='black', linewidth=3, zorder=10, label='Mean')
     
     ax_pos.set_xlabel('Time [s]', fontsize=11)
     ax_pos.set_ylabel('Position Error [m]', fontsize=11)
@@ -283,7 +284,7 @@ def main():
     ax_pos.set_xlim(0, max_time)
     if len(interpolated_pos_errors) > 0:
         ax_pos.legend(loc='best', fontsize=9)
-    
+
     # Bottom right: Yaw error
     ax_yaw = fig.add_subplot(gs[1, 1])
     
@@ -303,8 +304,8 @@ def main():
         
         if len(interpolated_yaw_errors) > 0:
             mean_yaw_error = np.mean(interpolated_yaw_errors, axis=0)
-            ax_yaw.plot(common_time, mean_yaw_error, 
-                       color='black', linewidth=3, zorder=10)
+            ax_yaw.plot(common_time, mean_yaw_error,
+                       color='black', linewidth=3, zorder=10, label='Mean')
         
         ax_yaw.set_xlabel('Time [s]', fontsize=11)
         ax_yaw.set_ylabel('Yaw Error [deg]', fontsize=11)
@@ -317,7 +318,34 @@ def main():
         ax_yaw.text(0.5, 0.5, 'Yaw data not available', 
                    ha='center', va='center', transform=ax_yaw.transAxes, fontsize=12)
         ax_yaw.set_title('Absolute Yaw Error', fontsize=12)
-    
+
+    # Sliders for legend size and axes labels/numbers
+    legend_size_init = 10
+    axes_size_init = 11
+    fig.subplots_adjust(bottom=0.18)
+    ax_slider_legend = fig.add_axes([0.22, 0.08, 0.5, 0.03])
+    ax_slider_axes = fig.add_axes([0.22, 0.02, 0.5, 0.03])
+    slider_legend = Slider(ax_slider_legend, 'Legend size', 6, 24, valinit=legend_size_init, valstep=1)
+    slider_axes = Slider(ax_slider_axes, 'Axes labels & numbers', 6, 24, valinit=axes_size_init, valstep=1)
+
+    def update_font_sizes(_val):
+        leg_size = int(slider_legend.val)
+        ax_size = int(slider_axes.val)
+        for ax in (ax_top, ax_pos, ax_yaw):
+            ax.tick_params(axis='both', labelsize=ax_size)
+            ax.set_xlabel(ax.get_xlabel(), fontsize=ax_size)
+            ax.set_ylabel(ax.get_ylabel(), fontsize=ax_size)
+            ax.set_title(ax.get_title(), fontsize=ax_size)
+            leg = ax.get_legend()
+            if leg is not None:
+                for t in leg.get_texts():
+                    t.set_fontsize(leg_size)
+        fig.canvas.draw_idle()
+
+    slider_legend.on_changed(update_font_sizes)
+    slider_axes.on_changed(update_font_sizes)
+    update_font_sizes(None)  # apply initial slider values
+
     # Save the plot
     output_path = os.path.join(data_folder, 'esi_and_mir_plot.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
