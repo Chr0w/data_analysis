@@ -7,7 +7,7 @@ import os
 import sys
 import numpy as np
 
-DATA_DIR = '/home/mircrda/data_analysis/spearman_rank_test_data'
+DATA_DIR = '/home/mircrda/data_analysis/spearman_rank_test_data_esi_vs_rmse'
 ESI_PATH = os.path.join(DATA_DIR, 'esi.txt')
 RMSE_PATH = os.path.join(DATA_DIR, 'rmse.txt')
 

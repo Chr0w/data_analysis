@@ -59,11 +59,12 @@ def main():
             file_data[file_id] = df_file
             all_timestamps.append(df_file['time_normalized'].values)
 
-    # Common time grid and interpolated mean ESI
-    max_time = max([ts.max() if len(ts) > 0 else 0 for ts in all_timestamps])
+    # Common time grid: use intersection of run durations so every run has real ESI data
+    min_time = 0.0
+    max_time = min([ts.max() if len(ts) > 0 else 0 for ts in all_timestamps])
     min_dt = min([np.diff(ts).min() if len(ts) > 1 and np.diff(ts).min() > 0 else 1.0
                  for ts in all_timestamps if len(ts) > 1])
-    common_time = np.arange(0, max_time + min_dt, min_dt)
+    common_time = np.arange(min_time, max_time + min_dt, min_dt)
 
     interpolated_esi = []
     for file_id in sorted(file_data.keys()):

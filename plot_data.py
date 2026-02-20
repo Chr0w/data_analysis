@@ -2,7 +2,7 @@
 """
 Script to plot data from CSV files as line plots.
 Creates one subplot for each numeric column, using row index (line number) as x-axis.
-Plots data from both default and tuning CSV files for comparison.
+Plots data from default, default_02, and tuning CSV files for comparison.
 """
 
 import pandas as pd
@@ -11,16 +11,21 @@ import numpy as np
 import sys
 import os
 import math
+from matplotlib.widgets import Slider
 
 def main():
     # Paths to the CSV files
     user_home = os.path.expanduser('~')
-    default_csv_path = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl/default_combined_results.csv')
-    tuning_csv_path = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/alpha_tuning/tuning_combined_results.csv')
+    default_csv_path = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl/default_combined_results_new.csv')
+    default_02_csv_path = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_02/default_02_combined_results_new.csv')
+    tuning_csv_path = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/alpha_tuning/tuning_combined_results_new.csv')
     
     # Check if files exist
     if not os.path.exists(default_csv_path):
         print(f"Error: File not found at {default_csv_path}")
+        sys.exit(1)
+    if not os.path.exists(default_02_csv_path):
+        print(f"Error: File not found at {default_02_csv_path}")
         sys.exit(1)
     if not os.path.exists(tuning_csv_path):
         print(f"Error: File not found at {tuning_csv_path}")
@@ -32,6 +37,11 @@ def main():
         df_default.columns = df_default.columns.str.strip()
         print(f"Loaded {len(df_default)} rows from {default_csv_path}")
         print(f"Default columns: {list(df_default.columns)}")
+
+        df_default_02 = pd.read_csv(default_02_csv_path)
+        df_default_02.columns = df_default_02.columns.str.strip()
+        print(f"Loaded {len(df_default_02)} rows from {default_02_csv_path}")
+        print(f"Default_02 columns: {list(df_default_02.columns)}")
         
         df_tuning = pd.read_csv(tuning_csv_path)
         df_tuning.columns = df_tuning.columns.str.strip()
@@ -43,15 +53,17 @@ def main():
     
     # Get numeric columns from both dataframes (exclude timestamp and specified columns)
     numeric_cols_default = df_default.select_dtypes(include=[np.number]).columns.tolist()
+    numeric_cols_default_02 = df_default_02.select_dtypes(include=[np.number]).columns.tolist()
     numeric_cols_tuning = df_tuning.select_dtypes(include=[np.number]).columns.tolist()
     
     # Columns to exclude (including std deviation - only plot RMSE)
-    exclude_cols = ['timestamp', 'total_messages', 'duration_s', 'msg_rate_hz', 'ESI_range', 'ESI_std_dev', 'mean_ESI', 'position_max_error', 'yaw_max_error', 'position_mean_error', 'yaw_mean_error', 'sum_cov_trace', 'position_std_dev', 'yaw_std_dev']
+    exclude_cols = ['timestamp', 'total_messages', 'duration_s', 'msg_rate_hz', 'ESI_range', 'ESI_std_dev', 'mean_ESI', 'position_max_error', 'yaw_max_error', 'position_mean_error', 'yaw_mean_error', 'sum_cov_trace', 'position_std_dev', 'yaw_std_dev', 'run_id', 'yaw_RMSE']
     numeric_cols_default = [col for col in numeric_cols_default if col not in exclude_cols]
+    numeric_cols_default_02 = [col for col in numeric_cols_default_02 if col not in exclude_cols]
     numeric_cols_tuning = [col for col in numeric_cols_tuning if col not in exclude_cols]
     
     # Get common columns to plot
-    numeric_cols = list(set(numeric_cols_default) & set(numeric_cols_tuning))
+    numeric_cols = list(set(numeric_cols_default) & set(numeric_cols_default_02) & set(numeric_cols_tuning))
     
     if not numeric_cols:
         print("Error: No common numeric columns found to plot")
@@ -67,28 +79,36 @@ def main():
     print("Mean RMSE Values:")
     print("="*60)
     
-    if 'position_RMSE' in df_default.columns and 'position_RMSE' in df_tuning.columns:
+    if 'position_RMSE' in df_default.columns and 'position_RMSE' in df_default_02.columns and 'position_RMSE' in df_tuning.columns:
         mean_pos_rmse_default = df_default['position_RMSE'].mean()
+        mean_pos_rmse_default_02 = df_default_02['position_RMSE'].mean()
         mean_pos_rmse_tuning = df_tuning['position_RMSE'].mean()
         print(f"Position RMSE")
         print(f"Default: {mean_pos_rmse_default:.6f}")
+        print(f"Default_02: {mean_pos_rmse_default_02:.6f}")
         print(f"Tuning:  {mean_pos_rmse_tuning:.6f}")
-        reduction_pes = ((mean_pos_rmse_default - mean_pos_rmse_tuning) / mean_pos_rmse_default) * 100
-        print(f"Reduction: {reduction_pes:.2f}%")
+        reduction_default = ((mean_pos_rmse_default - mean_pos_rmse_tuning) / mean_pos_rmse_default) * 100
+        reduction_default_02 = ((mean_pos_rmse_default_02 - mean_pos_rmse_tuning) / mean_pos_rmse_default_02) * 100
+        print(f"Reduction vs Default: {reduction_default:.2f}%")
+        print(f"Reduction vs Default_02: {reduction_default_02:.2f}%")
 
     else:
         print("Position RMSE column not found in one or both datasets")
     
     print()
     
-    if 'yaw_RMSE' in df_default.columns and 'yaw_RMSE' in df_tuning.columns:
+    if 'yaw_RMSE' in df_default.columns and 'yaw_RMSE' in df_default_02.columns and 'yaw_RMSE' in df_tuning.columns:
         print(f"Yaw RMSE")
         mean_yaw_rmse_default = df_default['yaw_RMSE'].mean()
+        mean_yaw_rmse_default_02 = df_default_02['yaw_RMSE'].mean()
         mean_yaw_rmse_tuning = df_tuning['yaw_RMSE'].mean()
         print(f"Default: {mean_yaw_rmse_default:.6f}")
+        print(f"Default_02: {mean_yaw_rmse_default_02:.6f}")
         print(f"Tuning:  {mean_yaw_rmse_tuning:.6f}")
-        reduction_yaw = ((mean_yaw_rmse_default - mean_yaw_rmse_tuning) / mean_yaw_rmse_default) * 100
-        print(f"Reduction: {reduction_yaw:.2f}%")
+        reduction_yaw_default = ((mean_yaw_rmse_default - mean_yaw_rmse_tuning) / mean_yaw_rmse_default) * 100
+        reduction_yaw_default_02 = ((mean_yaw_rmse_default_02 - mean_yaw_rmse_tuning) / mean_yaw_rmse_default_02) * 100
+        print(f"Reduction vs Default: {reduction_yaw_default:.2f}%")
+        print(f"Reduction vs Default_02: {reduction_yaw_default_02:.2f}%")
     else:
         print("Yaw RMSE column not found in one or both datasets")
     
@@ -110,33 +130,44 @@ def main():
     
     # Create row indices for both dataframes
     row_indices_default = df_default.index.values
+    row_indices_default_02 = df_default_02.index.values
     row_indices_tuning = df_tuning.index.values
     
+    # Collect title text objects for the title-size slider
+    title_texts = []
+
     # Plot each numeric column
     for idx, col in enumerate(numeric_cols):
         ax = axes[idx]
         # Use correct_map_integrity_ratio if col is map_integrity_ratio
         col_default = 'correct_map_integrity_ratio' if col == 'map_integrity_ratio' else col
+        col_default_02 = 'correct_map_integrity_ratio' if col == 'map_integrity_ratio' else col
         col_tuning = 'correct_map_integrity_ratio' if col == 'map_integrity_ratio' else col
         
         # Check if the correct column exists, otherwise use original
         if col == 'map_integrity_ratio':
             if 'correct_map_integrity_ratio' not in df_default.columns:
                 col_default = col
+            if 'correct_map_integrity_ratio' not in df_default_02.columns:
+                col_default_02 = col
             if 'correct_map_integrity_ratio' not in df_tuning.columns:
                 col_tuning = col
         
         # Plot default data (add 1 to indices to show 1-30 instead of 0-29)
-        ax.plot(row_indices_default + 1, df_default[col_default], linewidth=2, 
-                markersize=6, alpha=0.7, label='Default', color='red')
+        ax.plot(row_indices_default + 1, df_default[col_default], linewidth=2,
+                markersize=6, alpha=0.7, color='red', label='Default')
+        ax.plot(row_indices_default_02 + 1, df_default_02[col_default_02], linewidth=2,
+                markersize=6, alpha=0.7, color='green', label='Default_02')
         # Plot tuning data (add 1 to indices to show 1-30 instead of 0-29)
-        ax.plot(row_indices_tuning + 1, df_tuning[col_tuning], linewidth=2, 
-                markersize=6, alpha=0.7, label='Tuning', color='blue')
+        ax.plot(row_indices_tuning + 1, df_tuning[col_tuning], linewidth=3,
+                markersize=6, alpha=0.7, color='blue', label='Tuning')
         # Add horizontal lines for mean values
         mean_default = df_default[col_default].mean()
+        mean_default_02 = df_default_02[col_default_02].mean()
         mean_tuning = df_tuning[col_tuning].mean()
-        ax.axhline(mean_default, color='red', linestyle='--', linewidth=1.5, alpha=0.8, label=f'Default mean ({mean_default:.4g})')
-        ax.axhline(mean_tuning, color='blue', linestyle='--', linewidth=1.5, alpha=0.8, label=f'Tuning mean ({mean_tuning:.4g})')
+        ax.axhline(mean_default, color='red', linestyle='--', linewidth=1.5, alpha=0.8)
+        ax.axhline(mean_default_02, color='green', linestyle='--', linewidth=1.5, alpha=0.8)
+        ax.axhline(mean_tuning, color='blue', linestyle='--', linewidth=1.5, alpha=0.8)
         ax.set_xlabel('Run number', fontsize=15)
         ax.set_ylabel(col, fontsize=15)
         
@@ -144,39 +175,73 @@ def main():
         title = col
         if 'position' in col.lower() and 'rmse' in col.lower():
             title = f"Position RMSE [m]"
-            ax.text(0.30, 0.96, title, transform=ax.transAxes, fontsize=17, 
+            t = ax.text(0.30, 0.96, title, transform=ax.transAxes, fontsize=17, 
             fontweight='bold', verticalalignment='top', 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            title_texts.append(t)
         elif 'yaw' in col.lower() and 'rmse' in col.lower():
             title = f"Yaw RMSE [deg]"
-            ax.text(0.30, 0.96, title, transform=ax.transAxes, fontsize=17, 
+            t = ax.text(0.30, 0.96, title, transform=ax.transAxes, fontsize=17, 
             fontweight='bold', verticalalignment='top', 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            title_texts.append(t)
         elif 'position_std_dev' in col.lower():
             title = f"Position std deviation [m]"
-            ax.text(0.25, 0.96, title, transform=ax.transAxes, fontsize=17, 
+            t = ax.text(0.25, 0.96, title, transform=ax.transAxes, fontsize=17, 
             fontweight='bold', verticalalignment='top', 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            title_texts.append(t)
         elif 'yaw_std_dev' in col.lower():
             title = f"Yaw std deviation [deg]"
-            ax.text(0.20, 0.96, title, transform=ax.transAxes, fontsize=17, 
+            t = ax.text(0.20, 0.96, title, transform=ax.transAxes, fontsize=17, 
             fontweight='bold', verticalalignment='top', 
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            title_texts.append(t)
 
         
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=14, loc='upper right')
-        # Set x-ticks to show specific values: 1, 5, 10, 15, 20, 25, 30
-        x_ticks = [1, 5, 10, 15, 20, 25, 30]
+        # Set x-ticks to show specific values up to the largest dataset length.
+        max_runs = max(len(df_default), len(df_default_02), len(df_tuning))
+        x_ticks = [1] + [x for x in range(5, max_runs + 1, 5)]
+        if x_ticks[-1] != max_runs:
+            x_ticks.append(max_runs)
         ax.set_xticks(x_ticks)
     
     # Hide unused subplots
     for idx in range(len(numeric_cols), len(axes)):
         axes[idx].set_visible(False)
-    
-    # Adjust spacing between subplots
-    plt.subplots_adjust(hspace=0.2, top=0.95, bottom=0.05, left=0.05, right=0.95)
-    
+
+    # Axis and title text size sliders
+    axis_fontsize_init = 15
+    title_fontsize_init = 17
+    plt.subplots_adjust(hspace=0.2, top=0.95, bottom=0.22, left=0.05, right=0.95)
+    ax_slider_axis = plt.axes([0.25, 0.10, 0.5, 0.03])
+    ax_slider_title = plt.axes([0.25, 0.05, 0.5, 0.03])
+    slider_axis_fontsize = Slider(ax_slider_axis, "Axis text size", 6, 28, valinit=axis_fontsize_init, valstep=1)
+    slider_title_fontsize = Slider(ax_slider_title, "Title text size", 6, 32, valinit=title_fontsize_init, valstep=1)
+
+    def update_axis_fontsize(val):
+        fs = int(slider_axis_fontsize.val)
+        for i in range(len(numeric_cols)):
+            ax = axes[i]
+            ax.tick_params(axis="x", labelsize=fs)
+            ax.tick_params(axis="y", labelsize=fs)
+            ax.xaxis.get_label().set_fontsize(fs)
+            ax.yaxis.get_label().set_fontsize(fs)
+        fig.canvas.draw_idle()
+
+    def update_title_fontsize(val):
+        fs = int(slider_title_fontsize.val)
+        for t in title_texts:
+            t.set_fontsize(fs)
+        fig.canvas.draw_idle()
+
+    slider_axis_fontsize.on_changed(update_axis_fontsize)
+    slider_title_fontsize.on_changed(update_title_fontsize)
+    update_axis_fontsize(axis_fontsize_init)
+    update_title_fontsize(title_fontsize_init)
+
     # Save the plot
     output_path = f'/home/{os.getenv("USER")}/data_analysis/line_plot.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -184,67 +249,6 @@ def main():
     
     # Show the line plot
     plt.show()
-    
-    # Create histogram plots for RMSE values
-    if 'position_RMSE' in df_default.columns and 'position_RMSE' in df_tuning.columns and \
-       'yaw_RMSE' in df_default.columns and 'yaw_RMSE' in df_tuning.columns:
-        
-        fig_hist, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-        fig_hist.suptitle('RMSE Histograms: Default vs Tuning', fontsize=24, y=1.0)
-        
-        # Calculate shared bin edges for Position RMSE
-        pos_rmse_min = min(df_default['position_RMSE'].min(), df_tuning['position_RMSE'].min())
-        pos_rmse_max = max(df_default['position_RMSE'].max(), df_tuning['position_RMSE'].max())
-        pos_rmse_bins = np.linspace(pos_rmse_min, pos_rmse_max, 21)  # 21 edges = 20 bins
-        bin_width_pos = pos_rmse_bins[1] - pos_rmse_bins[0]
-        
-        # Calculate histogram counts for Position RMSE
-        counts_default_pos, _ = np.histogram(df_default['position_RMSE'], bins=pos_rmse_bins)
-        counts_tuning_pos, _ = np.histogram(df_tuning['position_RMSE'], bins=pos_rmse_bins)
-        bin_centers_pos = (pos_rmse_bins[:-1] + pos_rmse_bins[1:]) / 2
-        
-        # Position RMSE histogram - side by side bars with default on left
-        ax1.bar(bin_centers_pos - bin_width_pos/4, counts_default_pos, width=bin_width_pos/2, 
-                alpha=0.7, label='Default', color='blue', edgecolor='black', linewidth=1.2)
-        ax1.bar(bin_centers_pos + bin_width_pos/4, counts_tuning_pos, width=bin_width_pos/2, 
-                alpha=0.7, label='Tuning', color='red', edgecolor='black', linewidth=1.2)
-        ax1.set_xlabel('Position RMSE [m]', fontsize=18)
-        ax1.set_ylabel('Frequency', fontsize=18)
-        ax1.set_title('Position RMSE Distribution [m]', fontsize=20, fontweight='bold')
-        ax1.legend(fontsize=15, loc='upper right')
-        ax1.grid(True, alpha=0.3, axis='y')
-        
-        # Calculate shared bin edges for Yaw RMSE
-        yaw_rmse_min = min(df_default['yaw_RMSE'].min(), df_tuning['yaw_RMSE'].min())
-        yaw_rmse_max = max(df_default['yaw_RMSE'].max(), df_tuning['yaw_RMSE'].max())
-        yaw_rmse_bins = np.linspace(yaw_rmse_min, yaw_rmse_max, 21)  # 21 edges = 20 bins
-        bin_width_yaw = yaw_rmse_bins[1] - yaw_rmse_bins[0]
-        
-        # Calculate histogram counts for Yaw RMSE
-        counts_default_yaw, _ = np.histogram(df_default['yaw_RMSE'], bins=yaw_rmse_bins)
-        counts_tuning_yaw, _ = np.histogram(df_tuning['yaw_RMSE'], bins=yaw_rmse_bins)
-        bin_centers_yaw = (yaw_rmse_bins[:-1] + yaw_rmse_bins[1:]) / 2
-        
-        # Yaw RMSE histogram - side by side bars with default on left
-        ax2.bar(bin_centers_yaw - bin_width_yaw/4, counts_default_yaw, width=bin_width_yaw/2, 
-                alpha=0.7, label='Default', color='blue', edgecolor='black', linewidth=1.2)
-        ax2.bar(bin_centers_yaw + bin_width_yaw/4, counts_tuning_yaw, width=bin_width_yaw/2, 
-                alpha=0.7, label='Tuning', color='red', edgecolor='black', linewidth=1.2)
-        ax2.set_xlabel('Yaw RMSE [deg]', fontsize=18)
-        ax2.set_ylabel('Frequency', fontsize=18)
-        ax2.set_title('Yaw RMSE Distribution [deg]', fontsize=20, fontweight='bold')
-        ax2.legend(fontsize=15, loc='upper right')
-        ax2.grid(True, alpha=0.3, axis='y')
-        
-        plt.tight_layout()
-        
-        # Save the histogram plot
-        hist_output_path = f'/home/{os.getenv("USER")}/data_analysis/rmse_histograms.png'
-        fig_hist.savefig(hist_output_path, dpi=300, bbox_inches='tight')
-        print(f"Histogram plot saved to {hist_output_path}")
-        
-        # Show the histogram plot
-        plt.show()
 
 if __name__ == '__main__':
     main()
