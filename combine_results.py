@@ -142,10 +142,10 @@ def combine_folder(
     n_files: int = 30,
     skip_rows: int = 100,
     load_pct: float | None = None,
-) -> pd.DataFrame:
+) -> pd.DataFrame | None:
     """
     Process 1.csv .. n_files.csv in data_folder and write combined results to output_path.
-    Returns the combined DataFrame.
+    Returns the combined DataFrame, or None if no valid runs found.
     """
     pct = load_pct if load_pct is not None else load_percentage
     rows = []
@@ -158,8 +158,8 @@ def combine_folder(
         if row is not None:
             rows.append(row)
     if not rows:
-        print(f"Error: No valid runs in {data_folder}", file=sys.stderr)
-        sys.exit(1)
+        print(f"Warning: No valid runs in {data_folder}, skipping...", file=sys.stderr)
+        return None
     df = pd.DataFrame(rows)
     df.to_csv(output_path, index=False)
     print(f"Wrote {len(df)} rows to {output_path}")
@@ -174,25 +174,26 @@ def main():
     default_out = os.path.join(default_folder, "default_combined_results_new.csv")
     default_02_folder = os.path.join(base, "default_02")
     default_02_out = os.path.join(default_02_folder, "default_02_combined_results_new.csv")
+    default_001_folder = os.path.join(base, "default_001")
+    default_001_out = os.path.join(default_001_folder, "default_001_combined_results_new.csv")
     tuning_folder = os.path.join(base, "alpha_tuning")
     tuning_out = os.path.join(tuning_folder, "tuning_combined_results_new.csv")
 
-    if not os.path.isdir(default_folder):
-        print(f"Error: Folder not found: {default_folder}", file=sys.stderr)
-        sys.exit(1)
-    if not os.path.isdir(default_02_folder):
-        print(f"Error: Folder not found: {default_02_folder}", file=sys.stderr)
-        sys.exit(1)
-    if not os.path.isdir(tuning_folder):
-        print(f"Error: Folder not found: {tuning_folder}", file=sys.stderr)
-        sys.exit(1)
+    folders_to_process = [
+        (default_folder, default_out, "default_amcl"),
+        (default_02_folder, default_02_out, "default_02"),
+        (default_001_folder, default_001_out, "default_001"),
+        (tuning_folder, tuning_out, "alpha_tuning"),
+    ]
 
-    print(f"Combining default_amcl runs (first {load_percentage*100:.0f}% of each file)...")
-    combine_folder(default_folder, default_out, load_pct=load_percentage)
-    print(f"Combining default_02 runs (first {load_percentage*100:.0f}% of each file)...")
-    combine_folder(default_02_folder, default_02_out, load_pct=load_percentage)
-    print(f"Combining alpha_tuning runs (first {load_percentage*100:.0f}% of each file)...")
-    combine_folder(tuning_folder, tuning_out, load_pct=load_percentage)
+    for folder, output, name in folders_to_process:
+        if not os.path.isdir(folder):
+            print(f"Warning: Folder not found: {folder}, skipping...", file=sys.stderr)
+            continue
+        print(f"Combining {name} runs (first {load_percentage*100:.0f}% of each file)...")
+        result = combine_folder(folder, output, load_pct=load_percentage)
+        if result is None:
+            print(f"Skipped {name} (no valid runs found)")
     print("Done.")
 
 

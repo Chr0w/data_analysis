@@ -12,61 +12,75 @@ import sys
 import os
 import math
 from matplotlib.widgets import Slider
+from data_loader import calculate_position_error
+
+# Thresholds
+POSITION_THRESHOLD = 0.5  # meters
+YAW_THRESHOLD = 15.0  # degrees
+
+
+def calculate_yaw_error(gt_yaw, amcl_yaw):
+    """Absolute yaw error in degrees (handles wrapping)."""
+    diff = gt_yaw - amcl_yaw
+    diff = ((diff + 180) % 360) - 180
+    return abs(diff)
 
 def main():
     # Paths to the CSV files
     user_home = os.path.expanduser('~')
-    default_csv_path = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl/default_combined_results_new.csv')
-    default_02_csv_path = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_02/default_02_combined_results_new.csv')
-    tuning_csv_path = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/alpha_tuning/tuning_combined_results_new.csv')
+    csv_files = [
+        ('default', os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl/default_combined_results_new.csv')),
+        ('default_02', os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_02/default_02_combined_results_new.csv')),
+        ('default_001', os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_001/default_001_combined_results_new.csv')),
+        ('tuning', os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/alpha_tuning/tuning_combined_results_new.csv')),
+    ]
     
-    # Check if files exist
-    if not os.path.exists(default_csv_path):
-        print(f"Error: File not found at {default_csv_path}")
-        sys.exit(1)
-    if not os.path.exists(default_02_csv_path):
-        print(f"Error: File not found at {default_02_csv_path}")
-        sys.exit(1)
-    if not os.path.exists(tuning_csv_path):
-        print(f"Error: File not found at {tuning_csv_path}")
-        sys.exit(1)
+    # Read the CSV files (skip missing ones)
+    dataframes = {}
+    for name, csv_path in csv_files:
+        if not os.path.exists(csv_path):
+            print(f"Warning: File not found at {csv_path}, skipping...", file=sys.stderr)
+            continue
+        try:
+            df = pd.read_csv(csv_path)
+            df.columns = df.columns.str.strip()
+            if len(df) == 0:
+                print(f"Warning: File {csv_path} is empty, skipping...", file=sys.stderr)
+                continue
+            dataframes[name] = df
+            print(f"Loaded {len(df)} rows from {csv_path}")
+            print(f"{name} columns: {list(df.columns)}")
+        except Exception as e:
+            print(f"Warning: Error reading {csv_path}: {e}, skipping...", file=sys.stderr)
+            continue
     
-    # Read the CSV files
-    try:
-        df_default = pd.read_csv(default_csv_path)
-        df_default.columns = df_default.columns.str.strip()
-        print(f"Loaded {len(df_default)} rows from {default_csv_path}")
-        print(f"Default columns: {list(df_default.columns)}")
-
-        df_default_02 = pd.read_csv(default_02_csv_path)
-        df_default_02.columns = df_default_02.columns.str.strip()
-        print(f"Loaded {len(df_default_02)} rows from {default_02_csv_path}")
-        print(f"Default_02 columns: {list(df_default_02.columns)}")
-        
-        df_tuning = pd.read_csv(tuning_csv_path)
-        df_tuning.columns = df_tuning.columns.str.strip()
-        print(f"Loaded {len(df_tuning)} rows from {tuning_csv_path}")
-        print(f"Tuning columns: {list(df_tuning.columns)}")
-    except Exception as e:
-        print(f"Error reading CSV file: {e}")
+    if not dataframes:
+        print("Error: No valid CSV files found to plot", file=sys.stderr)
         sys.exit(1)
     
-    # Get numeric columns from both dataframes (exclude timestamp and specified columns)
-    numeric_cols_default = df_default.select_dtypes(include=[np.number]).columns.tolist()
-    numeric_cols_default_02 = df_default_02.select_dtypes(include=[np.number]).columns.tolist()
-    numeric_cols_tuning = df_tuning.select_dtypes(include=[np.number]).columns.tolist()
+    # Assign to variables for backward compatibility (if they exist)
+    df_default = dataframes.get('default')
+    df_default_02 = dataframes.get('default_02')
+    df_default_001 = dataframes.get('default_001')
+    df_tuning = dataframes.get('tuning')
     
-    # Columns to exclude (including std deviation - only plot RMSE)
+    # Get numeric columns from all available dataframes (exclude timestamp and specified columns)
     exclude_cols = ['timestamp', 'total_messages', 'duration_s', 'msg_rate_hz', 'ESI_range', 'ESI_std_dev', 'mean_ESI', 'position_max_error', 'yaw_max_error', 'position_mean_error', 'yaw_mean_error', 'sum_cov_trace', 'position_std_dev', 'yaw_std_dev', 'run_id', 'yaw_RMSE']
-    numeric_cols_default = [col for col in numeric_cols_default if col not in exclude_cols]
-    numeric_cols_default_02 = [col for col in numeric_cols_default_02 if col not in exclude_cols]
-    numeric_cols_tuning = [col for col in numeric_cols_tuning if col not in exclude_cols]
     
-    # Get common columns to plot
-    numeric_cols = list(set(numeric_cols_default) & set(numeric_cols_default_02) & set(numeric_cols_tuning))
+    all_numeric_cols = []
+    for name, df in dataframes.items():
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        numeric_cols = [col for col in numeric_cols if col not in exclude_cols]
+        all_numeric_cols.append(set(numeric_cols))
+
+    # Get common columns to plot (intersection of all available datasets)
+    if all_numeric_cols:
+        numeric_cols = list(set.intersection(*all_numeric_cols))
+    else:
+        numeric_cols = []
     
     if not numeric_cols:
-        print("Error: No common numeric columns found to plot")
+        print("Error: No common numeric columns found to plot", file=sys.stderr)
         sys.exit(1)
     
     # Sort columns for consistent ordering (position_RMSE first, then yaw_RMSE)
@@ -79,38 +93,89 @@ def main():
     print("Mean RMSE Values:")
     print("="*60)
     
-    if 'position_RMSE' in df_default.columns and 'position_RMSE' in df_default_02.columns and 'position_RMSE' in df_tuning.columns:
-        mean_pos_rmse_default = df_default['position_RMSE'].mean()
-        mean_pos_rmse_default_02 = df_default_02['position_RMSE'].mean()
-        mean_pos_rmse_tuning = df_tuning['position_RMSE'].mean()
+    # Position RMSE
+    pos_rmse_data = {}
+    for name, df in dataframes.items():
+        if 'position_RMSE' in df.columns:
+            pos_rmse_data[name] = df['position_RMSE'].mean()
+    
+    if pos_rmse_data:
         print(f"Position RMSE")
-        print(f"Default: {mean_pos_rmse_default:.6f}")
-        print(f"Default_02: {mean_pos_rmse_default_02:.6f}")
-        print(f"Tuning:  {mean_pos_rmse_tuning:.6f}")
-        reduction_default = ((mean_pos_rmse_default - mean_pos_rmse_tuning) / mean_pos_rmse_default) * 100
-        reduction_default_02 = ((mean_pos_rmse_default_02 - mean_pos_rmse_tuning) / mean_pos_rmse_default_02) * 100
-        print(f"Reduction vs Default: {reduction_default:.2f}%")
-        print(f"Reduction vs Default_02: {reduction_default_02:.2f}%")
-
+        for name, mean_val in pos_rmse_data.items():
+            print(f"{name}: {mean_val:.6f}")
+        # Calculate reductions if tuning exists
+        if 'tuning' in pos_rmse_data:
+            tuning_val = pos_rmse_data['tuning']
+            for name, mean_val in pos_rmse_data.items():
+                if name != 'tuning':
+                    reduction = ((mean_val - tuning_val) / mean_val) * 100
+                    print(f"Reduction vs {name}: {reduction:.2f}%")
     else:
-        print("Position RMSE column not found in one or both datasets")
+        print("Position RMSE column not found in any dataset")
     
     print()
     
-    if 'yaw_RMSE' in df_default.columns and 'yaw_RMSE' in df_default_02.columns and 'yaw_RMSE' in df_tuning.columns:
+    # Yaw RMSE
+    yaw_rmse_data = {}
+    for name, df in dataframes.items():
+        if 'yaw_RMSE' in df.columns:
+            yaw_rmse_data[name] = df['yaw_RMSE'].mean()
+    
+    if yaw_rmse_data:
         print(f"Yaw RMSE")
-        mean_yaw_rmse_default = df_default['yaw_RMSE'].mean()
-        mean_yaw_rmse_default_02 = df_default_02['yaw_RMSE'].mean()
-        mean_yaw_rmse_tuning = df_tuning['yaw_RMSE'].mean()
-        print(f"Default: {mean_yaw_rmse_default:.6f}")
-        print(f"Default_02: {mean_yaw_rmse_default_02:.6f}")
-        print(f"Tuning:  {mean_yaw_rmse_tuning:.6f}")
-        reduction_yaw_default = ((mean_yaw_rmse_default - mean_yaw_rmse_tuning) / mean_yaw_rmse_default) * 100
-        reduction_yaw_default_02 = ((mean_yaw_rmse_default_02 - mean_yaw_rmse_tuning) / mean_yaw_rmse_default_02) * 100
-        print(f"Reduction vs Default: {reduction_yaw_default:.2f}%")
-        print(f"Reduction vs Default_02: {reduction_yaw_default_02:.2f}%")
+        for name, mean_val in yaw_rmse_data.items():
+            print(f"{name}: {mean_val:.6f}")
+        # Calculate reductions if tuning exists
+        if 'tuning' in yaw_rmse_data:
+            tuning_val = yaw_rmse_data['tuning']
+            for name, mean_val in yaw_rmse_data.items():
+                if name != 'tuning':
+                    reduction = ((mean_val - tuning_val) / mean_val) * 100
+                    print(f"Reduction vs {name}: {reduction:.2f}%")
     else:
-        print("Yaw RMSE column not found in one or both datasets")
+        print("Yaw RMSE column not found in any dataset")
+    
+    print("="*60 + "\n")
+    
+    # Calculate additional metrics from individual run files
+    print("\n" + "="*60)
+    print("Threshold-Based Metrics:")
+    print(f"Position threshold: {POSITION_THRESHOLD} m")
+    print(f"Yaw threshold: {YAW_THRESHOLD} deg")
+    print("="*60)
+    
+    # Map mode names to folder paths
+    mode_folders = {
+        'default': os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl'),
+        'default_02': os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_02'),
+        'default_001': os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_001'),
+        'tuning': os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/alpha_tuning'),
+    }
+    
+    # Calculate metrics for each available mode
+    for mode_name, folder_path in mode_folders.items():
+        if mode_name not in dataframes:
+            continue  # Skip if combined results don't exist
+        
+        if not os.path.isdir(folder_path):
+            print(f"\n{mode_name}: Folder not found, skipping threshold metrics...")
+            continue
+        
+        metrics = calculate_threshold_metrics(folder_path, POSITION_THRESHOLD, YAW_THRESHOLD)
+        if metrics is None:
+            print(f"\n{mode_name}: No valid run files found")
+            continue
+        
+        print(f"\n{mode_name}:")
+        print(f"  Average time below threshold (both pos and yaw): {metrics['avg_time_below']:.2f} s")
+        print(f"  Average time below threshold until first exceed (per run): {metrics['avg_time_until_exceed']:.2f} s")
+        pos_rmse = metrics['avg_position_RMSE_until_exceed']
+        yaw_rmse = metrics['avg_yaw_RMSE_until_exceed']
+        if not np.isnan(pos_rmse):
+            print(f"  Average position RMSE until first exceed: {pos_rmse:.6f} m")
+        if not np.isnan(yaw_rmse):
+            print(f"  Average yaw RMSE until first exceed: {yaw_rmse:.6f} deg")
+        print(f"  Total runs analyzed: {metrics['total_runs']}")
     
     print("="*60 + "\n")
     
@@ -128,46 +193,45 @@ def main():
     # Flatten axes array if needed
     axes = np.atleast_1d(axes).flatten()
     
-    # Create row indices for both dataframes
-    row_indices_default = df_default.index.values
-    row_indices_default_02 = df_default_02.index.values
-    row_indices_tuning = df_tuning.index.values
+    # Create row indices for available dataframes
+    row_indices = {}
+    for name, df in dataframes.items():
+        row_indices[name] = df.index.values
     
     # Collect title text objects for the title-size slider
     title_texts = []
 
+    # Define colors and labels for each dataset
+    dataset_config = {
+        'default': {'color': 'red', 'label': 'Default', 'linewidth': 2},
+        'default_02': {'color': 'green', 'label': 'Default_02', 'linewidth': 2},
+        'default_001': {'color': 'yellow', 'label': 'Default_001', 'linewidth': 2},
+        'tuning': {'color': 'blue', 'label': 'Tuning', 'linewidth': 3},
+    }
+    
     # Plot each numeric column
     for idx, col in enumerate(numeric_cols):
         ax = axes[idx]
-        # Use correct_map_integrity_ratio if col is map_integrity_ratio
-        col_default = 'correct_map_integrity_ratio' if col == 'map_integrity_ratio' else col
-        col_default_02 = 'correct_map_integrity_ratio' if col == 'map_integrity_ratio' else col
-        col_tuning = 'correct_map_integrity_ratio' if col == 'map_integrity_ratio' else col
         
-        # Check if the correct column exists, otherwise use original
-        if col == 'map_integrity_ratio':
-            if 'correct_map_integrity_ratio' not in df_default.columns:
-                col_default = col
-            if 'correct_map_integrity_ratio' not in df_default_02.columns:
-                col_default_02 = col
-            if 'correct_map_integrity_ratio' not in df_tuning.columns:
-                col_tuning = col
-        
-        # Plot default data (add 1 to indices to show 1-30 instead of 0-29)
-        ax.plot(row_indices_default + 1, df_default[col_default], linewidth=2,
-                markersize=6, alpha=0.7, color='red', label='Default')
-        ax.plot(row_indices_default_02 + 1, df_default_02[col_default_02], linewidth=2,
-                markersize=6, alpha=0.7, color='green', label='Default_02')
-        # Plot tuning data (add 1 to indices to show 1-30 instead of 0-29)
-        ax.plot(row_indices_tuning + 1, df_tuning[col_tuning], linewidth=3,
-                markersize=6, alpha=0.7, color='blue', label='Tuning')
-        # Add horizontal lines for mean values
-        mean_default = df_default[col_default].mean()
-        mean_default_02 = df_default_02[col_default_02].mean()
-        mean_tuning = df_tuning[col_tuning].mean()
-        ax.axhline(mean_default, color='red', linestyle='--', linewidth=1.5, alpha=0.8)
-        ax.axhline(mean_default_02, color='green', linestyle='--', linewidth=1.5, alpha=0.8)
-        ax.axhline(mean_tuning, color='blue', linestyle='--', linewidth=1.5, alpha=0.8)
+        # Plot data for each available dataframe
+        for name, df in dataframes.items():
+            # Use correct_map_integrity_ratio if col is map_integrity_ratio
+            plot_col = 'correct_map_integrity_ratio' if col == 'map_integrity_ratio' else col
+            
+            # Check if the correct column exists, otherwise use original
+            if col == 'map_integrity_ratio' and 'correct_map_integrity_ratio' not in df.columns:
+                plot_col = col
+            
+            if plot_col not in df.columns:
+                continue
+                
+            config = dataset_config.get(name, {'color': 'gray', 'label': name, 'linewidth': 2})
+            ax.plot(row_indices[name] + 1, df[plot_col], linewidth=config['linewidth'],
+                    markersize=6, alpha=0.7, color=config['color'], label=config['label'])
+            
+            # Add horizontal line for mean value
+            mean_val = df[plot_col].mean()
+            ax.axhline(mean_val, color=config['color'], linestyle='--', linewidth=1.5, alpha=0.8)
         ax.set_xlabel('Run number', fontsize=15)
         ax.set_ylabel(col, fontsize=15)
         
@@ -202,7 +266,7 @@ def main():
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=14, loc='upper right')
         # Set x-ticks to show specific values up to the largest dataset length.
-        max_runs = max(len(df_default), len(df_default_02), len(df_tuning))
+        max_runs = max(len(df) for df in dataframes.values()) if dataframes else 1
         x_ticks = [1] + [x for x in range(5, max_runs + 1, 5)]
         if x_ticks[-1] != max_runs:
             x_ticks.append(max_runs)
@@ -249,6 +313,158 @@ def main():
     
     # Show the line plot
     plt.show()
+
+def calculate_threshold_metrics(data_folder: str, pos_threshold: float, yaw_threshold: float, n_files: int = 30, skip_rows: int = 100):
+    """
+    Calculate threshold-based metrics from individual run CSV files.
+    
+    Returns:
+        dict with:
+        - runs_outside_threshold: number of runs where final entry is outside threshold
+        - avg_time_below: average time (per run) where both pos and yaw are below threshold
+        - avg_time_until_exceed: average time (per run) below threshold until first exceed
+        - avg_position_RMSE_until_exceed: average position RMSE (per run) up until first threshold exceed
+        - avg_yaw_RMSE_until_exceed: average yaw RMSE (per run) up until first threshold exceed
+        - total_runs: total number of runs analyzed
+    """
+    runs_outside = 0
+    times_below = []
+    times_until_exceed = []
+    position_rmse_until_exceed = []
+    yaw_rmse_until_exceed = []
+    total_runs = 0
+    
+    for run_id in range(1, n_files + 1):
+        # Try both naming conventions
+        csv_path = os.path.join(data_folder, f"{run_id}.csv")
+        if not os.path.exists(csv_path):
+            csv_path = os.path.join(data_folder, f"{run_id:02d}.csv")
+        if not os.path.exists(csv_path):
+            continue
+        
+        try:
+            df = pd.read_csv(csv_path, skiprows=range(1, skip_rows))
+            df.columns = df.columns.str.strip()
+            
+            required = ["timestamp", "ground_truth_x", "ground_truth_y", "amcl_x", "amcl_y"]
+            missing = [c for c in required if c not in df.columns]
+            if missing:
+                continue
+            
+            df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
+            df = df.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+            if len(df) == 0:
+                continue
+            
+            # Calculate position and yaw errors for each row
+            pos_errors = []
+            yaw_errors = []
+            has_yaw = "ground_truth_yaw" in df.columns and "amcl_yaw" in df.columns
+            
+            for _, row in df.iterrows():
+                pos_err = calculate_position_error(
+                    row["ground_truth_x"], row["ground_truth_y"],
+                    row["amcl_x"], row["amcl_y"]
+                )
+                pos_errors.append(pos_err)
+                
+                if has_yaw:
+                    yaw_err = calculate_yaw_error(row["ground_truth_yaw"], row["amcl_yaw"])
+                    yaw_errors.append(yaw_err)
+                else:
+                    yaw_errors.append(0.0)  # Assume perfect yaw if not available
+            
+            pos_errors = np.array(pos_errors)
+            yaw_errors = np.array(yaw_errors)
+            
+            # Check if final entry is outside threshold
+            final_pos = pos_errors[-1]
+            final_yaw = yaw_errors[-1]
+            if final_pos > pos_threshold or final_yaw > yaw_threshold:
+                runs_outside += 1
+            
+            # Calculate time intervals
+            timestamps = df["timestamp"].values
+            if len(timestamps) < 2:
+                continue
+            
+            # Total time below threshold (both pos and yaw) - across entire run
+            time_below = 0.0
+            # Time below threshold until first exceed - per run
+            time_until_exceed = 0.0
+            exceeded = False
+            exceed_index = len(pos_errors)  # Index where threshold is first exceeded (default to end if never exceeded)
+            
+            # Check if first point already exceeds threshold
+            if pos_errors[0] >= pos_threshold or yaw_errors[0] >= yaw_threshold:
+                exceeded = True
+                exceed_index = 0
+            
+            for i in range(len(timestamps) - 1):
+                dt = timestamps[i + 1] - timestamps[i]
+                if dt <= 0:
+                    continue
+                
+                # Check if both pos and yaw are below threshold at the start of this interval
+                pos_below = pos_errors[i] < pos_threshold
+                yaw_below = yaw_errors[i] < yaw_threshold
+                both_below = pos_below and yaw_below
+                
+                # Add to total time below if both are below (for entire run)
+                if both_below:
+                    time_below += dt
+                
+                # Track time until first exceed: add interval if not exceeded yet and both are below
+                if not exceeded and both_below:
+                    time_until_exceed += dt
+                
+                # Check if threshold is exceeded at the end of this interval
+                if not exceeded and i + 1 < len(pos_errors):
+                    pos_exceeded = pos_errors[i + 1] >= pos_threshold
+                    yaw_exceeded = yaw_errors[i + 1] >= yaw_threshold
+                    if pos_exceeded or yaw_exceeded:
+                        exceeded = True
+                        exceed_index = i + 1
+            
+            # Calculate RMSE up until first threshold exceed
+            if exceed_index > 0:
+                pos_errors_until_exceed = pos_errors[:exceed_index]
+                if len(pos_errors_until_exceed) > 0:
+                    position_rmse = float(np.sqrt(np.mean(pos_errors_until_exceed**2)))
+                    position_rmse_until_exceed.append(position_rmse)
+                
+                if has_yaw:
+                    yaw_errors_until_exceed = yaw_errors[:exceed_index]
+                    yaw_finite = yaw_errors_until_exceed[np.isfinite(yaw_errors_until_exceed)]
+                    if len(yaw_finite) > 0:
+                        yaw_rmse = float(np.sqrt(np.mean(yaw_finite**2)))
+                        yaw_rmse_until_exceed.append(yaw_rmse)
+            
+            times_below.append(time_below)
+            times_until_exceed.append(time_until_exceed)
+            total_runs += 1
+            
+        except Exception as e:
+            print(f"Warning: Error processing {csv_path}: {e}", file=sys.stderr)
+            continue
+    
+    if total_runs == 0:
+        return None
+    
+    avg_time_below = np.mean(times_below) if times_below else 0.0
+    avg_time_until_exceed = np.mean(times_until_exceed) if times_until_exceed else 0.0
+    avg_position_rmse = np.mean(position_rmse_until_exceed) if position_rmse_until_exceed else np.nan
+    avg_yaw_rmse = np.mean(yaw_rmse_until_exceed) if yaw_rmse_until_exceed else np.nan
+    
+    return {
+        'runs_outside_threshold': runs_outside,
+        'avg_time_below': avg_time_below,
+        'avg_time_until_exceed': avg_time_until_exceed,
+        'avg_position_RMSE_until_exceed': avg_position_rmse,
+        'avg_yaw_RMSE_until_exceed': avg_yaw_rmse,
+        'total_runs': total_runs,
+    }
+
 
 if __name__ == '__main__':
     main()
