@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
 """
-Script to plot threshold-based metrics as bar plots.
-Creates 4 subplots showing bar charts for each metric with mean and std dev.
+Script to plot threshold-based metrics as box plots.
+Creates 2 subplots: average time after last exceed and average time until first exceed.
+Boxes are outline-only (no fill), black outlines.
+
+Box plot elements (matplotlib default):
+- Box: 25th to 75th percentile (IQR). The thick line inside is the median (50th percentile).
+- Whiskers: extend from the box to the furthest data point within 1.5×IQR of the
+  lower/upper quartile (i.e. no further than Q1 - 1.5*IQR and Q3 + 1.5*IQR).
+  Points outside that range are drawn as fliers (outliers).
+- Diamond marker: arithmetic mean (matches printed averages).
 """
 
 import pandas as pd
@@ -17,7 +25,7 @@ POSITION_THRESHOLD = 1.0  # meters
 YAW_THRESHOLD = 45.0  # degrees
 do_threshold_variation_plot = False
 vary_metric_position = True
-print_medians = False
+print_medians = True
 
 def calculate_yaw_error(gt_yaw, amcl_yaw):
     """Absolute yaw error in degrees (handles wrapping)."""
@@ -143,62 +151,131 @@ def main():
             else:
                 print(f"    Median: {median_time_until:.2f} s")
         
-        # Position RMSE
-        pos_rmse = metrics['avg_position_RMSE_until_exceed']
-        median_pos_rmse = metrics.get('median_position_RMSE_until_exceed', np.nan)
-        if not np.isnan(pos_rmse):
+        # Average time after last instance of being lost (per run)
+        time_after_last = metrics['avg_time_after_last_exceed']
+        median_time_after_last = metrics.get('median_time_after_last_exceed', np.nan)
+        if default_02_metrics and mode_name != 'default_02':
+            default_02_after = default_02_metrics['avg_time_after_last_exceed']
+            if default_02_after > 0:
+                improvement = ((time_after_last - default_02_after) / default_02_after) * 100
+                print(f"  Average time after last instance of being lost (per run): {time_after_last:.2f} s ({improvement:+.1f}%)")
+            else:
+                print(f"  Average time after last instance of being lost (per run): {time_after_last:.2f} s")
+        else:
+            print(f"  Average time after last instance of being lost (per run): {time_after_last:.2f} s")
+        if not np.isnan(median_time_after_last):
+            if default_02_metrics and mode_name != 'default_02':
+                default_02_median_after = default_02_metrics.get('median_time_after_last_exceed', np.nan)
+                if not np.isnan(default_02_median_after) and default_02_median_after > 0:
+                    improvement = ((median_time_after_last - default_02_median_after) / default_02_median_after) * 100
+                    print(f"    Median: {median_time_after_last:.2f} s ({improvement:+.1f}%)")
+                else:
+                    print(f"    Median: {median_time_after_last:.2f} s")
+            else:
+                print(f"    Median: {median_time_after_last:.2f} s")
+        
+        # Position RMSE (pre-lost: until first exceed)
+        pos_rmse_pre = metrics['avg_position_RMSE_until_exceed']
+        median_pos_rmse_pre = metrics.get('median_position_RMSE_until_exceed', np.nan)
+        if not np.isnan(pos_rmse_pre):
             if default_02_metrics and mode_name != 'default_02':
                 default_02_pos = default_02_metrics['avg_position_RMSE_until_exceed']
                 if not np.isnan(default_02_pos) and default_02_pos > 0:
-                    # For RMSE, lower is better, so improvement is negative when RMSE decreases
-                    improvement = ((default_02_pos - pos_rmse) / default_02_pos) * 100
-                    print(f"  Average position RMSE until first exceed: {pos_rmse:.6f} m ({improvement:+.1f}%)")
+                    improvement = ((default_02_pos - pos_rmse_pre) / default_02_pos) * 100
+                    print(f"  Position RMSE (pre-lost, until first exceed): {pos_rmse_pre:.6f} m ({improvement:+.1f}%)")
                 else:
-                    print(f"  Average position RMSE until first exceed: {pos_rmse:.6f} m")
+                    print(f"  Position RMSE (pre-lost, until first exceed): {pos_rmse_pre:.6f} m")
             else:
-                print(f"  Average position RMSE until first exceed: {pos_rmse:.6f} m")
-            if print_medians and not np.isnan(median_pos_rmse):
+                print(f"  Position RMSE (pre-lost, until first exceed): {pos_rmse_pre:.6f} m")
+            if print_medians and not np.isnan(median_pos_rmse_pre):
                 if default_02_metrics and mode_name != 'default_02':
                     default_02_median_pos = default_02_metrics.get('median_position_RMSE_until_exceed', np.nan)
                     if not np.isnan(default_02_median_pos) and default_02_median_pos > 0:
-                        # For RMSE, lower is better, so improvement is positive when RMSE decreases
-                        improvement = ((default_02_median_pos - median_pos_rmse) / default_02_median_pos) * 100
-                        print(f"    Median: {median_pos_rmse:.6f} m ({improvement:+.1f}%)")
+                        improvement = ((default_02_median_pos - median_pos_rmse_pre) / default_02_median_pos) * 100
+                        print(f"    Median: {median_pos_rmse_pre:.6f} m ({improvement:+.1f}%)")
                     else:
-                        print(f"    Median: {median_pos_rmse:.6f} m")
+                        print(f"    Median: {median_pos_rmse_pre:.6f} m")
                 else:
-                    print(f"    Median: {median_pos_rmse:.6f} m")
+                    print(f"    Median: {median_pos_rmse_pre:.6f} m")
         
-        # Yaw RMSE
-        yaw_rmse = metrics['avg_yaw_RMSE_until_exceed']
-        median_yaw_rmse = metrics.get('median_yaw_RMSE_until_exceed', np.nan)
-        if not np.isnan(yaw_rmse):
+        # Position RMSE (post-lost: after last exceed)
+        pos_rmse_post = metrics.get('avg_position_RMSE_after_last_exceed', np.nan)
+        median_pos_rmse_post = metrics.get('median_position_RMSE_after_last_exceed', np.nan)
+        if not np.isnan(pos_rmse_post):
+            if default_02_metrics and mode_name != 'default_02':
+                default_02_pos_post = default_02_metrics.get('avg_position_RMSE_after_last_exceed', np.nan)
+                if not np.isnan(default_02_pos_post) and default_02_pos_post > 0:
+                    improvement = ((default_02_pos_post - pos_rmse_post) / default_02_pos_post) * 100
+                    print(f"  Position RMSE (post-lost, after last exceed): {pos_rmse_post:.6f} m ({improvement:+.1f}%)")
+                else:
+                    print(f"  Position RMSE (post-lost, after last exceed): {pos_rmse_post:.6f} m")
+            else:
+                print(f"  Position RMSE (post-lost, after last exceed): {pos_rmse_post:.6f} m")
+            if print_medians and not np.isnan(median_pos_rmse_post):
+                if default_02_metrics and mode_name != 'default_02':
+                    default_02_median_pos_post = default_02_metrics.get('median_position_RMSE_after_last_exceed', np.nan)
+                    if not np.isnan(default_02_median_pos_post) and default_02_median_pos_post > 0:
+                        improvement = ((default_02_median_pos_post - median_pos_rmse_post) / default_02_median_pos_post) * 100
+                        print(f"    Median: {median_pos_rmse_post:.6f} m ({improvement:+.1f}%)")
+                    else:
+                        print(f"    Median: {median_pos_rmse_post:.6f} m")
+                else:
+                    print(f"    Median: {median_pos_rmse_post:.6f} m")
+        
+        # Yaw RMSE (pre-lost: until first exceed)
+        yaw_rmse_pre = metrics['avg_yaw_RMSE_until_exceed']
+        median_yaw_rmse_pre = metrics.get('median_yaw_RMSE_until_exceed', np.nan)
+        if not np.isnan(yaw_rmse_pre):
             if default_02_metrics and mode_name != 'default_02':
                 default_02_yaw = default_02_metrics['avg_yaw_RMSE_until_exceed']
                 if not np.isnan(default_02_yaw) and default_02_yaw > 0:
-                    # For RMSE, lower is better, so improvement is negative when RMSE decreases
-                    improvement = ((default_02_yaw - yaw_rmse) / default_02_yaw) * 100
-                    print(f"  Average yaw RMSE until first exceed: {yaw_rmse:.6f} deg ({improvement:+.1f}%)")
+                    improvement = ((default_02_yaw - yaw_rmse_pre) / default_02_yaw) * 100
+                    print(f"  Yaw RMSE (pre-lost, until first exceed): {yaw_rmse_pre:.6f} deg ({improvement:+.1f}%)")
                 else:
-                    print(f"  Average yaw RMSE until first exceed: {yaw_rmse:.6f} deg")
+                    print(f"  Yaw RMSE (pre-lost, until first exceed): {yaw_rmse_pre:.6f} deg")
             else:
-                print(f"  Average yaw RMSE until first exceed: {yaw_rmse:.6f} deg")
-            if print_medians and not np.isnan(median_yaw_rmse):
+                print(f"  Yaw RMSE (pre-lost, until first exceed): {yaw_rmse_pre:.6f} deg")
+            if print_medians and not np.isnan(median_yaw_rmse_pre):
                 if default_02_metrics and mode_name != 'default_02':
                     default_02_median_yaw = default_02_metrics.get('median_yaw_RMSE_until_exceed', np.nan)
                     if not np.isnan(default_02_median_yaw) and default_02_median_yaw > 0:
-                        # For RMSE, lower is better, so improvement is positive when RMSE decreases
-                        improvement = ((default_02_median_yaw - median_yaw_rmse) / default_02_median_yaw) * 100
-                        print(f"    Median: {median_yaw_rmse:.6f} deg ({improvement:+.1f}%)")
+                        improvement = ((default_02_median_yaw - median_yaw_rmse_pre) / default_02_median_yaw) * 100
+                        print(f"    Median: {median_yaw_rmse_pre:.6f} deg ({improvement:+.1f}%)")
                     else:
-                        print(f"    Median: {median_yaw_rmse:.6f} deg")
+                        print(f"    Median: {median_yaw_rmse_pre:.6f} deg")
                 else:
-                    print(f"    Median: {median_yaw_rmse:.6f} deg")
+                    print(f"    Median: {median_yaw_rmse_pre:.6f} deg")
+        
+        # Yaw RMSE (post-lost: after last exceed)
+        yaw_rmse_post = metrics.get('avg_yaw_RMSE_after_last_exceed', np.nan)
+        median_yaw_rmse_post = metrics.get('median_yaw_RMSE_after_last_exceed', np.nan)
+        if not np.isnan(yaw_rmse_post):
+            if default_02_metrics and mode_name != 'default_02':
+                default_02_yaw_post = default_02_metrics.get('avg_yaw_RMSE_after_last_exceed', np.nan)
+                if not np.isnan(default_02_yaw_post) and default_02_yaw_post > 0:
+                    improvement = ((default_02_yaw_post - yaw_rmse_post) / default_02_yaw_post) * 100
+                    print(f"  Yaw RMSE (post-lost, after last exceed): {yaw_rmse_post:.6f} deg ({improvement:+.1f}%)")
+                else:
+                    print(f"  Yaw RMSE (post-lost, after last exceed): {yaw_rmse_post:.6f} deg")
+            else:
+                print(f"  Yaw RMSE (post-lost, after last exceed): {yaw_rmse_post:.6f} deg")
+            if print_medians and not np.isnan(median_yaw_rmse_post):
+                if default_02_metrics and mode_name != 'default_02':
+                    default_02_median_yaw_post = default_02_metrics.get('median_yaw_RMSE_after_last_exceed', np.nan)
+                    if not np.isnan(default_02_median_yaw_post) and default_02_median_yaw_post > 0:
+                        improvement = ((default_02_median_yaw_post - median_yaw_rmse_post) / default_02_median_yaw_post) * 100
+                        print(f"    Median: {median_yaw_rmse_post:.6f} deg ({improvement:+.1f}%)")
+                    else:
+                        print(f"    Median: {median_yaw_rmse_post:.6f} deg")
+                else:
+                    print(f"    Median: {median_yaw_rmse_post:.6f} deg")
         
         # Number of runs that exceeded threshold
         runs_exceeded = metrics['runs_exceeded_threshold']
         total_runs = metrics['total_runs']
+        runs_ended_within = total_runs - metrics['runs_outside_threshold']
         print(f"  Runs that exceeded threshold (either pos or yaw): {runs_exceeded} / {total_runs}")
+        print(f"  Runs that ended within thresholds: {runs_ended_within} / {total_runs}")
         
         print(f"  Total runs analyzed: {total_runs}")
     
@@ -208,13 +285,33 @@ def main():
         print("Error: No metrics collected for plotting", file=sys.stderr)
         sys.exit(1)
     
-    # Define colors for each mode (consistent across all subplots)
-    mode_colors = {
-        'default': 'red',
-        'default_02': 'green',
-        'default_001': 'purple',
-        'tuning': 'blue',
-    }
+    # Save per-run (individual) results for each metric to CSV for loading in other scripts
+    rows = []
+    for mode, metrics in all_metrics.items():
+        n_runs = metrics['total_runs']
+        time_below = metrics['avg_time_below_per_run']
+        time_until_exceed = metrics['avg_time_until_exceed_per_run']
+        time_after_last = metrics['avg_time_after_last_exceed_per_run']
+        pos_rmse_pre = metrics['avg_position_RMSE_until_exceed_per_run']
+        yaw_rmse_pre = metrics['avg_yaw_RMSE_until_exceed_per_run']
+        pos_rmse_post = metrics.get('avg_position_RMSE_after_last_exceed_per_run', [])
+        yaw_rmse_post = metrics.get('avg_yaw_RMSE_after_last_exceed_per_run', [])
+        for run_idx in range(n_runs):
+            rows.append({
+                'mode': mode,
+                'run_idx': run_idx,
+                'time_below_threshold_s': time_below[run_idx] if run_idx < len(time_below) else np.nan,
+                'time_until_first_exceed_s': time_until_exceed[run_idx] if run_idx < len(time_until_exceed) else np.nan,
+                'time_after_last_exceed_s': time_after_last[run_idx] if run_idx < len(time_after_last) else np.nan,
+                'position_rmse_pre_lost_m': pos_rmse_pre[run_idx] if run_idx < len(pos_rmse_pre) else np.nan,
+                'yaw_rmse_pre_lost_deg': yaw_rmse_pre[run_idx] if run_idx < len(yaw_rmse_pre) else np.nan,
+                'position_rmse_post_lost_m': pos_rmse_post[run_idx] if run_idx < len(pos_rmse_post) else np.nan,
+                'yaw_rmse_post_lost_deg': yaw_rmse_post[run_idx] if run_idx < len(yaw_rmse_post) else np.nan,
+            })
+    results_df = pd.DataFrame(rows)
+    results_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'box_plot_individual_results.csv')
+    results_df.to_csv(results_path, index=False)
+    print(f"Per-run results saved to {results_path}")
     
     # Define mode labels
     mode_labels = {
@@ -230,11 +327,11 @@ def main():
     
     # Extract per-run data for each metric
     metric_data = {
-        'avg_time_below': {
+        'avg_time_after_last_exceed': {
             'values': {},
             'means': {},
             'stds': {},
-            'title': 'Average Time Below Threshold',
+            'title': 'Average Time After Last Exceed',
             'ylabel': 'Time [s]'
         },
         'avg_time_until_exceed': {
@@ -244,20 +341,6 @@ def main():
             'title': 'Average Time Until First Exceed',
             'ylabel': 'Time [s]'
         },
-        'avg_position_RMSE_until_exceed': {
-            'values': {},
-            'means': {},
-            'stds': {},
-            'title': 'Position RMSE Until First Exceed',
-            'ylabel': 'RMSE [m]'
-        },
-        'avg_yaw_RMSE_until_exceed': {
-            'values': {},
-            'means': {},
-            'stds': {},
-            'title': 'Yaw RMSE Until First Exceed',
-            'ylabel': 'RMSE [deg]'
-        }
     }
     
     # Collect per-run values and calculate statistics
@@ -266,10 +349,8 @@ def main():
         
         # Map metric keys to per-run keys
         metric_to_per_run = {
-            'avg_time_below': 'avg_time_below_per_run',
+            'avg_time_after_last_exceed': 'avg_time_after_last_exceed_per_run',
             'avg_time_until_exceed': 'avg_time_until_exceed_per_run',
-            'avg_position_RMSE_until_exceed': 'avg_position_RMSE_until_exceed_per_run',
-            'avg_yaw_RMSE_until_exceed': 'avg_yaw_RMSE_until_exceed_per_run',
         }
         
         # Get per-run data from the metrics dict
@@ -296,15 +377,14 @@ def main():
                 metric_data[metric_key]['means'][mode] = mean_val if not np.isnan(mean_val) else np.nan
                 metric_data[metric_key]['stds'][mode] = 0.0
     
-    # Create figure with 4 subplots (2x2 grid)
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    # Create figure with 2 subplots
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     axes = axes.flatten()
     
     # Store plot data for each subplot to enable updates
     plot_data_storage = []
     
     # Define initial font sizes for sliders (used in plotting)
-    legend_fontsize_init = 8
     text_fontsize_init = 9
     spacing_init = 1.0
     
@@ -327,7 +407,6 @@ def main():
                     'values': values,
                     'mean': mean_val,
                     'std': std_val,
-                    'color': mode_colors.get(mode, 'gray'),
                     'label': mode_labels.get(mode, mode)
                 })
                 labels.append(mode_labels.get(mode, mode))
@@ -338,17 +417,10 @@ def main():
             plot_data_storage.append(None)
             continue
         
-        # Set random seed for reproducible jitter
-        np.random.seed(42)
-        
-        # Store plot elements for this subplot
+        # Store plot elements for this subplot (for spacing slider redraw)
         plot_elements = {
             'ax': ax,
             'mode_data': mode_data,
-            'scatter_plots': [],
-            'mean_lines': [],
-            'std_lines_1': [],
-            'std_lines_2': [],
             'x_labels': [],
             'metric_info': metric_info,
             'idx': idx
@@ -357,112 +429,57 @@ def main():
         # Create initial x positions for each mode (spacing = 1.0)
         spacing = 1.0
         x_positions = np.arange(len(mode_data)) * spacing
+        box_width = 0.5 * spacing
         
-        # Plot individual data points as dots
-        for i, data in enumerate(mode_data):
-            x_center = x_positions[i]
-            values = data['values']
-            
-            # Add jitter to x positions to avoid overlap
-            n_points = len(values)
-            if n_points > 1:
-                jitter = np.random.normal(0, 0.05, n_points)  # Small jitter
-            else:
-                jitter = np.array([0])
-            
-            x_coords = x_center + jitter
-            
-            # Plot individual dots
-            scatter = ax.scatter(x_coords, values, color=data['color'], alpha=0.6, s=30, 
-                      edgecolors='black', linewidths=0.5, zorder=3)
-            plot_elements['scatter_plots'].append({
-                'scatter': scatter,
-                'x_center': x_center,
-                'jitter': jitter,
-                'values': values,
-                'color': data['color']
-            })
-            
-            # Draw mean and std dev markers
-            mean = data['mean']
-            std = data['std']
-            line_width = 0.25  # Width of horizontal lines around each mode
-            
-            # Draw mean line (thick, colored)
-            mean_line, = ax.plot([x_center - line_width, x_center + line_width], 
-                   [mean, mean],
-                   color=data['color'], linewidth=3, linestyle='-', 
-                   label='Mean' if i == 0 else '', zorder=4)
-            plot_elements['mean_lines'].append({
-                'line': mean_line,
-                'x_center': x_center,
-                'mean': mean,
-                'line_width': line_width,
-                'color': data['color']
-            })
-            
-            # Draw std dev lines
-            # 1 std dev (black, dashed)
-            std1_upper, = ax.plot([x_center - line_width*0.8, x_center + line_width*0.8], 
-                   [mean + std, mean + std],
-                   color='black', linewidth=2, linestyle='--', 
-                   alpha=0.8, label='1σ' if i == 0 else '', zorder=2)
-            std1_lower, = ax.plot([x_center - line_width*0.8, x_center + line_width*0.8], 
-                   [mean - std, mean - std],
-                   color='black', linewidth=2, linestyle='--', alpha=0.8, zorder=2)
-            plot_elements['std_lines_1'].append({
-                'upper': std1_upper,
-                'lower': std1_lower,
-                'x_center': x_center,
-                'mean': mean,
-                'std': std,
-                'line_width': line_width * 0.8
-            })
-            
-            # 2 std dev (black, dotted)
-            std2_upper, = ax.plot([x_center - line_width*0.6, x_center + line_width*0.6], 
-                   [mean + 2*std, mean + 2*std],
-                   color='black', linewidth=1.5, linestyle=':', 
-                   alpha=0.7, label='2σ' if i == 0 else '', zorder=1)
-            std2_lower, = ax.plot([x_center - line_width*0.6, x_center + line_width*0.6], 
-                   [mean - 2*std, mean - 2*std],
-                   color='black', linewidth=1.5, linestyle=':', alpha=0.7, zorder=1)
-            plot_elements['std_lines_2'].append({
-                'upper': std2_upper,
-                'lower': std2_lower,
-                'x_center': x_center,
-                'mean': mean,
-                'std': std,
-                'line_width': line_width * 0.6
-            })
+        # Data for boxplot: list of arrays, one per mode
+        data_for_boxplot = [data['values'] for data in mode_data]
         
-        # Set y-limits to accommodate all data AND std dev lines
+        # Regular box plot: outline only, no fill, black outlines
+        bp = ax.boxplot(
+            data_for_boxplot,
+            positions=x_positions,
+            widths=box_width,
+            patch_artist=True,
+            showfliers=True,
+            zorder=2,
+        )
+        for box in bp['boxes']:
+            box.set_facecolor('none')
+            box.set_edgecolor('black')
+            box.set_linewidth(1.5)
+        for median in bp['medians']:
+            median.set_color('black')
+            median.set_linewidth(1.5)
+        for whisker in bp['whiskers']:
+            whisker.set_color('black')
+            whisker.set_linestyle('--')
+        for cap in bp['caps']:
+            cap.set_color('black')
+        for flier in bp['fliers']:
+            flier.set_marker('o')
+            flier.set_markerfacecolor('none')
+            flier.set_markeredgecolor('black')
+        
+        # Draw mean (average) as a diamond so it matches the printed metrics
+        means = [data['mean'] for data in mode_data]
+        ax.scatter(x_positions, means, marker='D', s=40, color='black', edgecolors='black',
+                   linewidths=1, zorder=5)
+        
+        # Set y-limits to accommodate all data
         all_values = []
         for data in mode_data:
             all_values.extend(data['values'])
-            # Also include mean ± 2*std to ensure all std dev lines are visible
-            mean = data['mean']
-            std = data['std']
-            all_values.append(mean + 2*std)
-            all_values.append(mean - 2*std)
-        
         if all_values:
             y_min = min(all_values)
             y_max = max(all_values)
             y_range = y_max - y_min if y_max > y_min else 1
-            ax.set_ylim(y_min - y_range*0.1, y_max + y_range*0.1)
+            ax.set_ylim(y_min - y_range * 0.1, y_max + y_range * 0.1)
         
-        # Create x-axis labels with mean and 1 std dev
-        x_labels = []
-        for i, data in enumerate(mode_data):
-            mean = data['mean']
-            std = data['std']
-            label = f"{data['label']}:\n mean = {mean:.3f}"
-            x_labels.append(label)
+        # Create x-axis labels (mode names)
+        x_labels = [data['label'] for data in mode_data]
         plot_elements['x_labels'] = x_labels
         
         # Customize plot
-        # Remove x-axis label
         ax.set_xlabel('')
         ax.set_ylabel(metric_info['ylabel'], fontsize=text_fontsize_init)
         ax.set_title(metric_info['title'], fontsize=14, fontweight='bold')
@@ -470,31 +487,14 @@ def main():
         ax.set_xticklabels(x_labels, rotation=0, ha='center', fontsize=text_fontsize_init)
         ax.grid(True, alpha=0.3, axis='y', zorder=0)
         
-        # Set legend position: lower right for time plots (idx 0 and 1), upper right for others
-        if idx in [0, 1]:  # Time below threshold plots
-            ax.legend(loc='lower right', fontsize=8, ncol=3)
-        else:
-            ax.legend(loc='upper right', fontsize=8, ncol=3)
-        
         plot_data_storage.append(plot_elements)
     
-    # Add sliders for legend, text sizes, and spacing
-    plt.subplots_adjust(hspace=0.3, top=0.95, bottom=0.30, left=0.05, right=0.95)
-    ax_slider_legend = plt.axes([0.25, 0.15, 0.5, 0.03])
-    ax_slider_text = plt.axes([0.25, 0.10, 0.5, 0.03])
+    # Add sliders for text sizes and spacing
+    plt.subplots_adjust(hspace=0.3, top=0.95, bottom=0.22, left=0.05, right=0.95)
+    ax_slider_text = plt.axes([0.25, 0.12, 0.5, 0.03])
     ax_slider_spacing = plt.axes([0.25, 0.05, 0.5, 0.03])
-    slider_legend_fontsize = Slider(ax_slider_legend, "Legend text size", 6, 20, valinit=legend_fontsize_init, valstep=1)
     slider_text_fontsize = Slider(ax_slider_text, "Axis text size", 6, 20, valinit=text_fontsize_init, valstep=1)
     slider_spacing = Slider(ax_slider_spacing, "Mode spacing", 0.5, 3.0, valinit=spacing_init, valstep=0.1)
-    
-    def update_legend_fontsize(val):
-        fs = int(slider_legend_fontsize.val)
-        for ax in axes:
-            legend = ax.get_legend()
-            if legend:
-                for text in legend.get_texts():
-                    text.set_fontsize(fs)
-        fig.canvas.draw_idle()
     
     def update_text_fontsize(val):
         fs = int(slider_text_fontsize.val)
@@ -520,50 +520,63 @@ def main():
             ax = plot_elements['ax']
             mode_data = plot_elements['mode_data']
             n_modes = len(mode_data)
+            metric_info = plot_elements['metric_info']
+            idx = plot_elements['idx']
             
             # Recalculate x positions with new spacing
             x_positions = np.arange(n_modes) * spacing
+            box_width = 0.5 * spacing
             
-            # Update scatter plots
-            for i, scatter_data in enumerate(plot_elements['scatter_plots']):
-                x_center = x_positions[i]
-                x_coords = x_center + scatter_data['jitter']
-                scatter_data['scatter'].set_offsets(np.column_stack([x_coords, scatter_data['values']]))
-                scatter_data['x_center'] = x_center
+            # Redraw box plot with new positions
+            ax.clear()
+            data_for_boxplot = [data['values'] for data in mode_data]
+            bp = ax.boxplot(
+                data_for_boxplot,
+                positions=x_positions,
+                widths=box_width,
+                patch_artist=True,
+                showfliers=True,
+                zorder=2,
+            )
+            for box in bp['boxes']:
+                box.set_facecolor('none')
+                box.set_edgecolor('black')
+                box.set_linewidth(1.5)
+            for median in bp['medians']:
+                median.set_color('black')
+                median.set_linewidth(1.5)
+            for whisker in bp['whiskers']:
+                whisker.set_color('black')
+                whisker.set_linestyle('--')
+            for cap in bp['caps']:
+                cap.set_color('black')
+            for flier in bp['fliers']:
+                flier.set_marker('o')
+                flier.set_markerfacecolor('none')
+                flier.set_markeredgecolor('black')
             
-            # Update mean lines
-            for i, mean_data in enumerate(plot_elements['mean_lines']):
-                x_center = x_positions[i]
-                line_width = mean_data['line_width']
-                mean = mean_data['mean']
-                mean_data['line'].set_data([x_center - line_width, x_center + line_width], [mean, mean])
-                mean_data['x_center'] = x_center
+            # Draw mean (average) as a diamond
+            means = [data['mean'] for data in mode_data]
+            ax.scatter(x_positions, means, marker='D', s=40, color='black', edgecolors='black',
+                       linewidths=1, zorder=5)
             
-            # Update std dev lines
-            for i, std_data in enumerate(plot_elements['std_lines_1']):
-                x_center = x_positions[i]
-                line_width = std_data['line_width']
-                mean = std_data['mean']
-                std = std_data['std']
-                std_data['upper'].set_data([x_center - line_width, x_center + line_width], [mean + std, mean + std])
-                std_data['lower'].set_data([x_center - line_width, x_center + line_width], [mean - std, mean - std])
-                std_data['x_center'] = x_center
+            all_values = []
+            for data in mode_data:
+                all_values.extend(data['values'])
+            if all_values:
+                y_min = min(all_values)
+                y_max = max(all_values)
+                y_range = y_max - y_min if y_max > y_min else 1
+                ax.set_ylim(y_min - y_range * 0.1, y_max + y_range * 0.1)
             
-            for i, std_data in enumerate(plot_elements['std_lines_2']):
-                x_center = x_positions[i]
-                line_width = std_data['line_width']
-                mean = std_data['mean']
-                std = std_data['std']
-                std_data['upper'].set_data([x_center - line_width, x_center + line_width], [mean + 2*std, mean + 2*std])
-                std_data['lower'].set_data([x_center - line_width, x_center + line_width], [mean - 2*std, mean - 2*std])
-                std_data['x_center'] = x_center
-            
-            # Update x-axis ticks, labels, and limits
             fs = int(slider_text_fontsize.val)
+            ax.set_xlabel('')
+            ax.set_ylabel(metric_info['ylabel'], fontsize=fs)
+            ax.set_title(metric_info['title'], fontsize=14, fontweight='bold')
             ax.set_xticks(x_positions)
             ax.set_xticklabels(plot_elements['x_labels'], rotation=0, ha='center', fontsize=fs)
+            ax.grid(True, alpha=0.3, axis='y', zorder=0)
             
-            # Update x-axis limits to accommodate new spacing
             if len(x_positions) > 0:
                 x_min = x_positions[0] - spacing * 0.5
                 x_max = x_positions[-1] + spacing * 0.5
@@ -571,18 +584,16 @@ def main():
         
         fig.canvas.draw_idle()
     
-    slider_legend_fontsize.on_changed(update_legend_fontsize)
     slider_text_fontsize.on_changed(update_text_fontsize)
     slider_spacing.on_changed(update_spacing)
-    update_legend_fontsize(legend_fontsize_init)
     update_text_fontsize(text_fontsize_init)
     
     plt.tight_layout()
     
     # Save the plot
-    output_path = f'/home/{os.getenv("USER")}/data_analysis/bar_plot.png'
+    output_path = f'/home/{os.getenv("USER")}/data_analysis/box_plot.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"Plot saved to {output_path}")
+    print(f"Box plot saved to {output_path}")
     
     # Show the plot
     plt.show()
@@ -756,8 +767,11 @@ def calculate_threshold_metrics(data_folder: str, pos_threshold: float, yaw_thre
     runs_exceeded = 0  # Runs that exceeded threshold at any point
     times_below = []
     times_until_exceed = []
+    times_after_last_exceed = []  # Time from last "lost" (exceed) to end of run, per run
     position_rmse_until_exceed = []
     yaw_rmse_until_exceed = []
+    position_rmse_after_last_exceed = []
+    yaw_rmse_after_last_exceed = []
     total_runs = 0
     
     for run_id in range(1, n_files + 1):
@@ -820,11 +834,13 @@ def calculate_threshold_metrics(data_folder: str, pos_threshold: float, yaw_thre
             time_until_exceed = 0.0
             exceeded = False
             exceed_index = len(pos_errors)  # Index where threshold is first exceeded (default to end if never exceeded)
+            last_exceed_index = -1  # Index of last time robot was "lost" (exceeded threshold)
             
             # Check if first point already exceeds threshold
             if pos_errors[0] >= pos_threshold or yaw_errors[0] >= yaw_threshold:
                 exceeded = True
                 exceed_index = 0
+                last_exceed_index = 0
             
             for i in range(len(timestamps) - 1):
                 dt = timestamps[i + 1] - timestamps[i]
@@ -845,12 +861,14 @@ def calculate_threshold_metrics(data_folder: str, pos_threshold: float, yaw_thre
                     time_until_exceed += dt
                 
                 # Check if threshold is exceeded at the end of this interval
-                if not exceeded and i + 1 < len(pos_errors):
+                if i + 1 < len(pos_errors):
                     pos_exceeded = pos_errors[i + 1] >= pos_threshold
                     yaw_exceeded = yaw_errors[i + 1] >= yaw_threshold
                     if pos_exceeded or yaw_exceeded:
-                        exceeded = True
-                        exceed_index = i + 1
+                        if not exceeded:
+                            exceeded = True
+                            exceed_index = i + 1
+                        last_exceed_index = i + 1
             
             # Calculate RMSE up until first threshold exceed
             if exceed_index > 0:
@@ -865,11 +883,50 @@ def calculate_threshold_metrics(data_folder: str, pos_threshold: float, yaw_thre
                     if len(yaw_finite) > 0:
                         yaw_rmse = float(np.sqrt(np.mean(yaw_finite**2)))
                         yaw_rmse_until_exceed.append(yaw_rmse)
+            # One entry per run for alignment (NaN when no exceed)
+            if len(position_rmse_until_exceed) <= total_runs:
+                position_rmse_until_exceed.append(np.nan)
+            if len(yaw_rmse_until_exceed) <= total_runs:
+                yaw_rmse_until_exceed.append(np.nan)
+            
+            # RMSE after last exceed (post-lost: strictly after the last sample that exceeded;
+            # by definition that period has no exceed, so errors are within threshold or period is empty)
+            if last_exceed_index >= 0:
+                start_after = last_exceed_index + 1
+            else:
+                start_after = len(pos_errors)  # never lost → no post-lost period
+            if start_after < len(pos_errors):
+                pos_errors_after = pos_errors[start_after:]
+                if len(pos_errors_after) > 0:
+                    position_rmse_after_last_exceed.append(float(np.sqrt(np.mean(pos_errors_after**2))))
+                else:
+                    position_rmse_after_last_exceed.append(np.nan)
+                if has_yaw:
+                    yaw_errors_after = yaw_errors[start_after:]
+                    yaw_finite_after = yaw_errors_after[np.isfinite(yaw_errors_after)]
+                    if len(yaw_finite_after) > 0:
+                        yaw_rmse_after_last_exceed.append(float(np.sqrt(np.mean(yaw_finite_after**2))))
+                    else:
+                        yaw_rmse_after_last_exceed.append(np.nan)
+                else:
+                    yaw_rmse_after_last_exceed.append(np.nan)
+            else:
+                position_rmse_after_last_exceed.append(np.nan)
+                yaw_rmse_after_last_exceed.append(np.nan)
             
             # Check if this run exceeded the threshold at any point
             # If exceed_index < len(pos_errors), threshold was exceeded before the end
             if exceed_index < len(pos_errors):
                 runs_exceeded += 1
+            
+            # Time after last instance of being lost (duration strictly after the last exceeded sample;
+            # same period as post-lost RMSE — the recovered period only, or 0 if never recovered).
+            if last_exceed_index >= 0 and (last_exceed_index + 1) < len(timestamps):
+                raw = float(timestamps[-1] - timestamps[last_exceed_index + 1])
+                time_after_last_exceed = max(0.0, raw)
+            else:
+                time_after_last_exceed = 0.0  # Never lost, or no samples after last exceed
+            times_after_last_exceed.append(time_after_last_exceed)
             
             times_below.append(time_below)
             times_until_exceed.append(time_until_exceed)
@@ -884,12 +941,16 @@ def calculate_threshold_metrics(data_folder: str, pos_threshold: float, yaw_thre
     
     avg_time_below = np.mean(times_below) if times_below else 0.0
     avg_time_until_exceed = np.mean(times_until_exceed) if times_until_exceed else 0.0
-    avg_position_rmse = np.mean(position_rmse_until_exceed) if position_rmse_until_exceed else np.nan
-    avg_yaw_rmse = np.mean(yaw_rmse_until_exceed) if yaw_rmse_until_exceed else np.nan
+    avg_time_after_last_exceed = np.mean(times_after_last_exceed) if times_after_last_exceed else 0.0
+    avg_position_rmse = float(np.nanmean(position_rmse_until_exceed)) if position_rmse_until_exceed else np.nan
+    avg_yaw_rmse = float(np.nanmean(yaw_rmse_until_exceed)) if yaw_rmse_until_exceed else np.nan
+    avg_position_rmse_after = float(np.nanmean(position_rmse_after_last_exceed)) if position_rmse_after_last_exceed else np.nan
+    avg_yaw_rmse_after = float(np.nanmean(yaw_rmse_after_last_exceed)) if yaw_rmse_after_last_exceed else np.nan
     
     # Calculate medians
     median_time_below = np.median(times_below) if times_below else 0.0
     median_time_until_exceed = np.median(times_until_exceed) if times_until_exceed else 0.0
+    median_time_after_last_exceed = np.median(times_after_last_exceed) if times_after_last_exceed else 0.0
     if position_rmse_until_exceed and len(position_rmse_until_exceed) > 0:
         pos_rmse_valid = [v for v in position_rmse_until_exceed if not np.isnan(v)]
         median_position_rmse = np.median(pos_rmse_valid) if pos_rmse_valid else np.nan
@@ -900,23 +961,42 @@ def calculate_threshold_metrics(data_folder: str, pos_threshold: float, yaw_thre
         median_yaw_rmse = np.median(yaw_rmse_valid) if yaw_rmse_valid else np.nan
     else:
         median_yaw_rmse = np.nan
+    if position_rmse_after_last_exceed and len(position_rmse_after_last_exceed) > 0:
+        pos_after_valid = [v for v in position_rmse_after_last_exceed if not np.isnan(v)]
+        median_position_rmse_after = np.median(pos_after_valid) if pos_after_valid else np.nan
+    else:
+        median_position_rmse_after = np.nan
+    if yaw_rmse_after_last_exceed and len(yaw_rmse_after_last_exceed) > 0:
+        yaw_after_valid = [v for v in yaw_rmse_after_last_exceed if not np.isnan(v)]
+        median_yaw_rmse_after = np.median(yaw_after_valid) if yaw_after_valid else np.nan
+    else:
+        median_yaw_rmse_after = np.nan
     
     return {
         'runs_outside_threshold': runs_outside,
         'runs_exceeded_threshold': runs_exceeded,
         'avg_time_below': avg_time_below,
         'avg_time_until_exceed': avg_time_until_exceed,
+        'avg_time_after_last_exceed': avg_time_after_last_exceed,
         'avg_position_RMSE_until_exceed': avg_position_rmse,
         'avg_yaw_RMSE_until_exceed': avg_yaw_rmse,
-        'median_time_below': median_time_below,
-        'median_time_until_exceed': median_time_until_exceed,
+        'avg_position_RMSE_after_last_exceed': avg_position_rmse_after,
+        'avg_yaw_RMSE_after_last_exceed': avg_yaw_rmse_after,
         'median_position_RMSE_until_exceed': median_position_rmse,
         'median_yaw_RMSE_until_exceed': median_yaw_rmse,
+        'median_position_RMSE_after_last_exceed': median_position_rmse_after,
+        'median_yaw_RMSE_after_last_exceed': median_yaw_rmse_after,
+        'median_time_below': median_time_below,
+        'median_time_until_exceed': median_time_until_exceed,
+        'median_time_after_last_exceed': median_time_after_last_exceed,
         # Return per-run data for statistics
         'avg_time_below_per_run': times_below,
         'avg_time_until_exceed_per_run': times_until_exceed,
+        'avg_time_after_last_exceed_per_run': times_after_last_exceed,
         'avg_position_RMSE_until_exceed_per_run': position_rmse_until_exceed,
         'avg_yaw_RMSE_until_exceed_per_run': yaw_rmse_until_exceed,
+        'avg_position_RMSE_after_last_exceed_per_run': position_rmse_after_last_exceed,
+        'avg_yaw_RMSE_after_last_exceed_per_run': yaw_rmse_after_last_exceed,
         'total_runs': total_runs,
     }
 
