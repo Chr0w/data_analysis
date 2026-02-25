@@ -26,6 +26,7 @@ YAW_THRESHOLD = 45.0  # degrees
 do_threshold_variation_plot = False
 vary_metric_position = True
 print_medians = True
+exclude_runs = []  # List of run IDs to exclude, e.g., [1, 4, 5]
 
 def calculate_yaw_error(gt_yaw, amcl_yaw):
     """Absolute yaw error in degrees (handles wrapping)."""
@@ -91,7 +92,7 @@ def main():
             print(f"\n{mode_name}: Folder not found, skipping threshold metrics...")
             continue
         
-        metrics = calculate_threshold_metrics(folder_path, POSITION_THRESHOLD, YAW_THRESHOLD)
+        metrics = calculate_threshold_metrics(folder_path, POSITION_THRESHOLD, YAW_THRESHOLD, exclude_runs=exclude_runs)
         if metrics is None:
             print(f"\n{mode_name}: No valid run files found")
             continue
@@ -112,9 +113,9 @@ def main():
             default_02_time = default_02_metrics['avg_time_below']
             if default_02_time > 0:
                 improvement = ((time_below - default_02_time) / default_02_time) * 100
-                print(f"  Average time below threshold (both pos and yaw): {time_below:.2f} s ({improvement:+.1f}%)")
+                print(f"  Time spent below threshold (both pos and yaw): {time_below:.2f} s ({improvement:+.1f}%)")
             else:
-                print(f"  Average time below threshold (both pos and yaw): {time_below:.2f} s")
+                print(f"  Time spent below threshold (both pos and yaw): {time_below:.2f} s")
         else:
             print(f"  Average time below threshold (both pos and yaw): {time_below:.2f} s")
         if print_medians and not np.isnan(median_time_below):
@@ -128,18 +129,18 @@ def main():
             else:
                 print(f"    Median: {median_time_below:.2f} s")
         
-        # Average time until first exceed
+        # Average time until first exceed (pre-lost period)
         time_until = metrics['avg_time_until_exceed']
         median_time_until = metrics.get('median_time_until_exceed', np.nan)
         if default_02_metrics and mode_name != 'default_02':
             default_02_time_until = default_02_metrics['avg_time_until_exceed']
             if default_02_time_until > 0:
                 improvement = ((time_until - default_02_time_until) / default_02_time_until) * 100
-                print(f"  Average time below threshold until first exceed (per run): {time_until:.2f} s ({improvement:+.1f}%)")
+                print(f"  Time spent in pre-lost period (until first exceed): {time_until:.2f} s ({improvement:+.1f}%)")
             else:
-                print(f"  Average time below threshold until first exceed (per run): {time_until:.2f} s")
+                print(f"  Time spent in pre-lost period (until first exceed): {time_until:.2f} s")
         else:
-            print(f"  Average time below threshold until first exceed (per run): {time_until:.2f} s")
+            print(f"  Time spent in pre-lost period (until first exceed): {time_until:.2f} s")
         if print_medians and not np.isnan(median_time_until):
             if default_02_metrics and mode_name != 'default_02':
                 default_02_median_time_until = default_02_metrics.get('median_time_until_exceed', np.nan)
@@ -151,18 +152,18 @@ def main():
             else:
                 print(f"    Median: {median_time_until:.2f} s")
         
-        # Average time after last instance of being lost (per run)
+        # Average time after last instance of being lost (post-regained period)
         time_after_last = metrics['avg_time_after_last_exceed']
         median_time_after_last = metrics.get('median_time_after_last_exceed', np.nan)
         if default_02_metrics and mode_name != 'default_02':
             default_02_after = default_02_metrics['avg_time_after_last_exceed']
             if default_02_after > 0:
                 improvement = ((time_after_last - default_02_after) / default_02_after) * 100
-                print(f"  Average time after last instance of being lost (per run): {time_after_last:.2f} s ({improvement:+.1f}%)")
+                print(f"  Average time in post-regained period (after last exceed): {time_after_last:.2f} s ({improvement:+.1f}%)")
             else:
-                print(f"  Average time after last instance of being lost (per run): {time_after_last:.2f} s")
+                print(f"  Average time in post-regained period (after last exceed): {time_after_last:.2f} s")
         else:
-            print(f"  Average time after last instance of being lost (per run): {time_after_last:.2f} s")
+            print(f"  Average time in post-regained period (after last exceed): {time_after_last:.2f} s")
         if not np.isnan(median_time_after_last):
             if default_02_metrics and mode_name != 'default_02':
                 default_02_median_after = default_02_metrics.get('median_time_after_last_exceed', np.nan)
@@ -281,6 +282,9 @@ def main():
     
     print("="*60 + "\n")
     
+    # Print table of last entry errors for each run
+    print_last_entry_errors_table(all_metrics, mode_folders, POSITION_THRESHOLD, YAW_THRESHOLD, exclude_runs=exclude_runs)
+    
     if not all_metrics:
         print("Error: No metrics collected for plotting", file=sys.stderr)
         sys.exit(1)
@@ -327,18 +331,18 @@ def main():
     
     # Extract per-run data for each metric
     metric_data = {
-        'avg_time_after_last_exceed': {
-            'values': {},
-            'means': {},
-            'stds': {},
-            'title': 'Average Time After Last Exceed',
-            'ylabel': 'Time [s]'
-        },
         'avg_time_until_exceed': {
             'values': {},
             'means': {},
             'stds': {},
             'title': 'Average Time Until First Exceed',
+            'ylabel': 'Time [s]'
+        },
+        'avg_time_after_last_exceed': {
+            'values': {},
+            'means': {},
+            'stds': {},
+            'title': 'Average Time After Last Exceed',
             'ylabel': 'Time [s]'
         },
     }
@@ -671,7 +675,7 @@ def create_threshold_variation_plot(all_metrics, mode_folders, dataframes, user_
                 pos_thresh = pos_threshold_base
                 yaw_thresh = threshold_val
             
-            metrics = calculate_threshold_metrics(folder_path, pos_thresh, yaw_thresh)
+            metrics = calculate_threshold_metrics(folder_path, pos_thresh, yaw_thresh, exclude_runs=exclude_runs)
             if metrics is None:
                 # If no data, append NaN
                 threshold_data[mode_name]['avg_time_below'].append(np.nan)
@@ -758,11 +762,229 @@ def create_threshold_variation_plot(all_metrics, mode_folders, dataframes, user_
     # Show the plot
     plt.show()
 
-def calculate_threshold_metrics(data_folder: str, pos_threshold: float, yaw_threshold: float, n_files: int = 30, skip_rows: int = 100):
+def print_last_entry_errors_table(all_metrics, mode_folders, pos_threshold, yaw_threshold, exclude_runs=None):
+    """
+    Print a nice table showing the position and yaw error of the last entry for each run, for each mode.
+    
+    Args:
+        exclude_runs: List of run IDs to exclude from the table.
+    """
+    if exclude_runs is None:
+        exclude_runs = []
+    print("\n" + "="*60)
+    print("Last Entry Errors (Position and Yaw) for Each Run")
+    print("="*60)
+    
+    # Collect data for all modes
+    table_data = {}
+    
+    for mode_name, folder_path in mode_folders.items():
+        if mode_name not in all_metrics:
+            continue
+        
+        if not os.path.isdir(folder_path):
+            continue
+        
+        # Collect last entry errors for each run
+        last_pos_errors = []
+        last_yaw_errors = []
+        pre_lost_times = []  # Time in pre-lost period
+        post_regained_times = []  # Time in post-regained period
+        run_ids = []
+        
+        n_files = 30
+        skip_rows = 100
+        
+        for run_id in range(1, n_files + 1):
+            # Skip runs in the exclude list
+            if run_id in exclude_runs:
+                continue
+            
+            # Try both naming conventions
+            csv_path = os.path.join(folder_path, f"{run_id}.csv")
+            if not os.path.exists(csv_path):
+                csv_path = os.path.join(folder_path, f"{run_id:02d}.csv")
+            if not os.path.exists(csv_path):
+                continue
+            
+            try:
+                df = pd.read_csv(csv_path, skiprows=range(1, skip_rows))
+                df.columns = df.columns.str.strip()
+                
+                required = ["timestamp", "ground_truth_x", "ground_truth_y", "amcl_x", "amcl_y"]
+                missing = [c for c in required if c not in df.columns]
+                if missing:
+                    continue
+                
+                df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
+                df = df.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
+                if len(df) == 0:
+                    continue
+                
+                # Calculate position and yaw errors for all rows
+                pos_errors = []
+                yaw_errors = []
+                has_yaw = "ground_truth_yaw" in df.columns and "amcl_yaw" in df.columns
+                
+                for _, row in df.iterrows():
+                    pos_err = calculate_position_error(
+                        row["ground_truth_x"], row["ground_truth_y"],
+                        row["amcl_x"], row["amcl_y"]
+                    )
+                    pos_errors.append(pos_err)
+                    
+                    if has_yaw:
+                        yaw_err = calculate_yaw_error(row["ground_truth_yaw"], row["amcl_yaw"])
+                        yaw_errors.append(yaw_err)
+                    else:
+                        yaw_errors.append(0.0)
+                
+                pos_errors = np.array(pos_errors)
+                yaw_errors = np.array(yaw_errors)
+                
+                # Get last entry errors
+                last_pos_err = pos_errors[-1]
+                last_yaw_err = yaw_errors[-1]
+                
+                # Calculate pre-lost period (time until first exceed)
+                timestamps = df["timestamp"].values
+                time_pre_lost = 0.0
+                time_post_regained = 0.0
+                
+                if len(timestamps) >= 2:
+                    # Pre-lost period: iterate forward, find first exceed, sum time before that
+                    first_exceed_index = -1
+                    for i in range(len(pos_errors)):
+                        if pos_errors[i] >= pos_threshold or yaw_errors[i] >= yaw_threshold:
+                            first_exceed_index = i
+                            break
+                    
+                    # Sum time from start until first exceed
+                    if first_exceed_index > 0:
+                        # Sum intervals from 0 to first_exceed_index - 1
+                        for i in range(first_exceed_index):
+                            if i + 1 < len(timestamps):
+                                dt = timestamps[i + 1] - timestamps[i]
+                                if dt > 0:
+                                    time_pre_lost += dt
+                    elif first_exceed_index == -1:
+                        # Never exceeded, so pre-lost is the entire run
+                        for i in range(len(timestamps) - 1):
+                            dt = timestamps[i + 1] - timestamps[i]
+                            if dt > 0:
+                                time_pre_lost += dt
+                    
+                    # Post-regained period: iterate backward, find first exceed (going backwards), sum time from that point to end
+                    last_exceed_index = -1
+                    for i in range(len(pos_errors) - 1, -1, -1):  # Iterate backwards
+                        if pos_errors[i] >= pos_threshold or yaw_errors[i] >= yaw_threshold:
+                            last_exceed_index = i
+                            break
+                    
+                    # Sum time from last_exceed_index + 1 to end
+                    if last_exceed_index >= 0 and last_exceed_index + 1 < len(timestamps):
+                        # Sum intervals from last_exceed_index + 1 to end
+                        for i in range(last_exceed_index + 1, len(timestamps) - 1):
+                            dt = timestamps[i + 1] - timestamps[i]
+                            if dt > 0:
+                                time_post_regained += dt
+                    elif last_exceed_index == -1:
+                        # Never exceeded, so the entire run is within thresholds
+                        # Post-regained should be the entire run time (same as pre-lost)
+                        for i in range(len(timestamps) - 1):
+                            dt = timestamps[i + 1] - timestamps[i]
+                            if dt > 0:
+                                time_post_regained += dt
+                
+                last_pos_errors.append(last_pos_err)
+                last_yaw_errors.append(last_yaw_err)
+                pre_lost_times.append(time_pre_lost)
+                post_regained_times.append(time_post_regained)
+                run_ids.append(run_id)
+                
+            except Exception as e:
+                continue
+        
+        if len(run_ids) > 0:
+            table_data[mode_name] = {
+                'run_ids': run_ids,
+                'pos_errors': last_pos_errors,
+                'yaw_errors': last_yaw_errors,
+                'pre_lost_times': pre_lost_times,
+                'post_regained_times': post_regained_times
+            }
+    
+    if not table_data:
+        print("No data available for table")
+        return
+    
+    # Find the maximum number of runs across all modes
+    max_runs = max(len(data['run_ids']) for data in table_data.values())
+    
+    # Define mode labels
+    mode_labels = {
+        'default': 'Default',
+        'default_02': 'Default_02',
+        'default_001': 'Default_001',
+        'tuning': 'Tuning',
+    }
+    
+    # Print table header
+    print(f"\n{'Mode':<15} {'Run':<6} {'Pos Error (m)':<15} {'Yaw Error (deg)':<18} {'Pre-lost (s)':<15} {'Post-regained (s)':<18} {'Status':<10}")
+    print("-" * 100)
+    
+    # Print data for each mode
+    for mode_name in sorted(table_data.keys()):
+        data = table_data[mode_name]
+        mode_label = mode_labels.get(mode_name, mode_name)
+        
+        for i, run_id in enumerate(data['run_ids']):
+            pos_err = data['pos_errors'][i]
+            yaw_err = data['yaw_errors'][i]
+            pre_lost = data['pre_lost_times'][i]
+            post_regained = data['post_regained_times'][i]
+            
+            # Determine status
+            if pos_err > pos_threshold or yaw_err > yaw_threshold:
+                status = "EXCEEDED"
+            else:
+                status = "OK"
+            
+            print(f"{mode_label:<15} {run_id:<6} {pos_err:<15.6f} {yaw_err:<18.6f} {pre_lost:<15.2f} {post_regained:<18.2f} {status:<10}")
+    
+    # Print summary statistics
+    print("\n" + "-" * 100)
+    print("Summary Statistics:")
+    print("-" * 100)
+    print(f"{'Mode':<15} {'Runs':<8} {'Avg Pos (m)':<15} {'Avg Yaw (deg)':<18} {'Avg Pre-lost (s)':<18} {'Avg Post-regained (s)':<20} {'Exceeded':<10}")
+    print("-" * 100)
+    
+    for mode_name in sorted(table_data.keys()):
+        data = table_data[mode_name]
+        mode_label = mode_labels.get(mode_name, mode_name)
+        n_runs = len(data['run_ids'])
+        avg_pos = np.mean(data['pos_errors'])
+        avg_yaw = np.mean(data['yaw_errors'])
+        avg_pre_lost = np.mean(data['pre_lost_times'])
+        avg_post_regained = np.mean(data['post_regained_times'])
+        exceeded = sum(1 for i in range(n_runs) 
+                      if data['pos_errors'][i] > pos_threshold or data['yaw_errors'][i] > yaw_threshold)
+        
+        print(f"{mode_label:<15} {n_runs:<8} {avg_pos:<15.6f} {avg_yaw:<18.6f} {avg_pre_lost:<18.2f} {avg_post_regained:<20.2f} {exceeded:<10}")
+    
+    print("="*60 + "\n")
+
+def calculate_threshold_metrics(data_folder: str, pos_threshold: float, yaw_threshold: float, n_files: int = 30, skip_rows: int = 100, exclude_runs: list = None):
     """
     Calculate threshold-based metrics from individual run CSV files.
     Returns per-run data for calculating statistics.
+    
+    Args:
+        exclude_runs: List of run IDs to exclude from analysis, e.g., [1, 4, 5].
+            If None, defaults to empty list (no runs excluded).
     """
+    if exclude_runs is None:
+        exclude_runs = []
     runs_outside = 0
     runs_exceeded = 0  # Runs that exceeded threshold at any point
     times_below = []
@@ -775,6 +997,10 @@ def calculate_threshold_metrics(data_folder: str, pos_threshold: float, yaw_thre
     total_runs = 0
     
     for run_id in range(1, n_files + 1):
+        # Skip runs in the exclude list
+        if run_id in exclude_runs:
+            continue
+        
         # Try both naming conventions
         csv_path = os.path.join(data_folder, f"{run_id}.csv")
         if not os.path.exists(csv_path):
@@ -919,13 +1145,30 @@ def calculate_threshold_metrics(data_folder: str, pos_threshold: float, yaw_thre
             if exceed_index < len(pos_errors):
                 runs_exceeded += 1
             
-            # Time after last instance of being lost (duration strictly after the last exceeded sample;
-            # same period as post-lost RMSE — the recovered period only, or 0 if never recovered).
-            if last_exceed_index >= 0 and (last_exceed_index + 1) < len(timestamps):
-                raw = float(timestamps[-1] - timestamps[last_exceed_index + 1])
-                time_after_last_exceed = max(0.0, raw)
-            else:
-                time_after_last_exceed = 0.0  # Never lost, or no samples after last exceed
+            # Time after last instance of being lost (post-regained period)
+            # Iterate backward to find the last exceed, then sum time from that point to end
+            time_after_last_exceed = 0.0
+            last_exceed_index_backward = -1
+            for i in range(len(pos_errors) - 1, -1, -1):  # Iterate backwards
+                if pos_errors[i] >= pos_threshold or yaw_errors[i] >= yaw_threshold:
+                    last_exceed_index_backward = i
+                    break
+            
+            # Sum time from last_exceed_index_backward + 1 to end
+            if last_exceed_index_backward >= 0 and last_exceed_index_backward + 1 < len(timestamps):
+                # Sum intervals from last_exceed_index_backward + 1 to end
+                for i in range(last_exceed_index_backward + 1, len(timestamps) - 1):
+                    dt = timestamps[i + 1] - timestamps[i]
+                    if dt > 0:
+                        time_after_last_exceed += dt
+            elif last_exceed_index_backward == -1:
+                # Never exceeded, so the entire run is within thresholds
+                # Post-regained should be the entire run time
+                for i in range(len(timestamps) - 1):
+                    dt = timestamps[i + 1] - timestamps[i]
+                    if dt > 0:
+                        time_after_last_exceed += dt
+            
             times_after_last_exceed.append(time_after_last_exceed)
             
             times_below.append(time_below)

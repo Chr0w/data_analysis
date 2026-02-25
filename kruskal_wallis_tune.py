@@ -6,9 +6,10 @@ dynamic vs low alpha (default_001), for both periods (before lost, after regaine
 """
 
 import pandas as pd
+import os
 from scipy import stats
 
-CSV_PATH = "/home/mircrda/data_analysis/box_plot_individual_results.csv"
+CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'box_plot_individual_results.csv')
 
 DYNAMIC = "tuning"
 DEFAULT = "default_02"
@@ -43,6 +44,82 @@ def kruskal_two_groups(df, col, mode_a, mode_b):
         return None, None
     try:
         return stats.kruskal(a, b)
+    except Exception:
+        return None, None
+
+
+def test_proportions(df, mode_a, mode_b):
+    """
+    Test if the proportion of runs ending localized differs between two modes.
+    Uses Fisher's exact test for small samples, chi-square for larger samples.
+    Returns (statistic, p_value) or (None, None) if invalid.
+    """
+    # A run ends localized if it has post-lost RMSE data (recovered and ended within thresholds)
+    # OR if time_after_last_exceed > 0 (recovered after last exceed)
+    # We'll use: has post-lost position RMSE data as the indicator
+    def is_localized(row):
+        # Check if post-lost RMSE exists (not NaN) - indicates recovery and ending within thresholds
+        return pd.notna(row.get('position_rmse_post_lost_m', None)) or (row.get('time_after_last_exceed_s', 0) > 0)
+    
+    a_localized = df.loc[df["mode"] == mode_a].apply(is_localized, axis=1).sum()
+    a_total = len(df.loc[df["mode"] == mode_a])
+    b_localized = df.loc[df["mode"] == mode_b].apply(is_localized, axis=1).sum()
+    b_total = len(df.loc[df["mode"] == mode_b])
+    
+    if a_total == 0 or b_total == 0:
+        return None, None
+    
+    a_not_localized = a_total - a_localized
+    b_not_localized = b_total - b_localized
+    
+    # Create contingency table
+    contingency = [[a_localized, a_not_localized],
+                   [b_localized, b_not_localized]]
+    
+    try:
+        # Use Fisher's exact test (more appropriate for small samples)
+        if a_total < 30 or b_total < 30:
+            oddsratio, p_value = stats.fisher_exact(contingency)
+            return ('fisher', oddsratio), p_value
+        else:
+            # Chi-square test for larger samples
+            chi2, p_value, dof, expected = stats.chi2_contingency(contingency)
+            return ('chi2', chi2), p_value
+    except Exception:
+        return None, None
+
+
+def test_proportions_hardcoded(df, mode_a, mode_b, localized_counts):
+    """
+    Test if the proportion of runs ending localized differs between two modes.
+    Uses hardcoded values for localized counts.
+    Uses Fisher's exact test for small samples, chi-square for larger samples.
+    Returns (statistic, p_value) or (None, None) if invalid.
+    """
+    a_localized = localized_counts.get(mode_a, 0)
+    a_total = len(df.loc[df["mode"] == mode_a])
+    b_localized = localized_counts.get(mode_b, 0)
+    b_total = len(df.loc[df["mode"] == mode_b])
+    
+    if a_total == 0 or b_total == 0:
+        return None, None
+    
+    a_not_localized = a_total - a_localized
+    b_not_localized = b_total - b_localized
+    
+    # Create contingency table
+    contingency = [[a_localized, a_not_localized],
+                   [b_localized, b_not_localized]]
+    
+    try:
+        # Use Fisher's exact test (more appropriate for small samples)
+        if a_total < 30 or b_total < 30:
+            oddsratio, p_value = stats.fisher_exact(contingency)
+            return ('fisher', oddsratio), p_value
+        else:
+            # Chi-square test for larger samples
+            chi2, p_value, dof, expected = stats.chi2_contingency(contingency)
+            return ('chi2', chi2), p_value
     except Exception:
         return None, None
 
@@ -109,6 +186,57 @@ def main():
     for period_name, metrics in PERIODS:
         results = run_tests(df, metrics)
         print_table(results, f"Period: {period_name}")
+    
+    # Test proportion of runs ending localized
+    print("=" * 80)
+    print("Proportion of Runs Ending Localized")
+    print("=" * 80)
+    
+    # Hardcoded values for runs ending localized
+    localized_counts = {
+        DEFAULT: 10,
+        LOW_ALPHA: 11,
+        DYNAMIC: 20,
+    }
+    
+    # Get total counts from data
+    for mode in [DYNAMIC, DEFAULT, LOW_ALPHA]:
+        mode_df = df.loc[df["mode"] == mode]
+        if len(mode_df) > 0:
+            localized = localized_counts.get(mode, 0)
+            total = len(mode_df)
+            prop = localized / total if total > 0 else 0
+            print(f"{mode}: {localized}/{total} ({prop:.1%})")
+    
+    print()
+    
+    # Test differences using hardcoded values
+    result_def = test_proportions_hardcoded(df, DYNAMIC, DEFAULT, localized_counts)
+    result_low = test_proportions_hardcoded(df, DYNAMIC, LOW_ALPHA, localized_counts)
+    
+    print("Comparison: dynamic vs default")
+    if result_def[0] is not None:
+        test_type, stat_def = result_def[0]
+        p_def = result_def[1]
+        test_name = "Fisher's exact (odds ratio)" if test_type == 'fisher' else "Chi-square"
+        print(f"  {test_name}: {stat_def:.4f}")
+        print(f"  p-value: {p_def:.4f}")
+        print(f"  Significant: {'Yes' if p_def < 0.05 else 'No'}")
+    else:
+        print("  Could not compute test")
+    print()
+    
+    print("Comparison: dynamic vs low alpha")
+    if result_low[0] is not None:
+        test_type, stat_low = result_low[0]
+        p_low = result_low[1]
+        test_name = "Fisher's exact (odds ratio)" if test_type == 'fisher' else "Chi-square"
+        print(f"  {test_name}: {stat_low:.4f}")
+        print(f"  p-value: {p_low:.4f}")
+        print(f"  Significant: {'Yes' if p_low < 0.05 else 'No'}")
+    else:
+        print("  Could not compute test")
+    print()
 
 
 if __name__ == "__main__":
