@@ -26,8 +26,8 @@ def main():
     read_file_percentage = 0.5  # First 50% of data
     N = 30
     user_home = os.path.expanduser('~')
-    data_folder = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl')
-    out_dir = '/home/mircrda/data_analysis/spearman_rank_test_data_esi_vs_mir'
+    data_folder = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/old_data/default_amcl')
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'spearman_rank_test_data_esi_vs_mir')
 
     # Load combined data (first 50% of each file) for mean ESI
     print("Loading data (first 50% of each file)...")
