@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-First 50 seconds of all 30 default_amcl files, split into 10 map_integrity_ratio bins (0.1 increment).
+First 80 seconds of all 30 default_amcl files, split into 10 map_integrity_ratio bins (0.1 increment).
 Balance bins by taking the same number of random samples as the smallest bin.
 Print mean, min and max for position and yaw error on the balanced data.
 Mean of means for first 7 bins as reference; print and plot differences for all 10 bins.
@@ -19,7 +19,7 @@ from data_loader import calculate_position_error
 USER_HOME = os.path.expanduser("~")
 DATA_FOLDER = os.path.join(
     USER_HOME,
-    "pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl",
+    "pCloudDrive/Offline/PhD/Folders/test_data/article_data/old_data/default_amcl",
 )
 N_FILES = 30
 FIRST_N_SECONDS = 80.0
@@ -136,7 +136,7 @@ def main():
     bin_counts_esi = [len(groups_pos_esi[b]) for b in range(n_bins)]
     min_count_esi = min(bin_counts_esi) if bin_counts_esi else 0
     if min_count_esi == 0:
-        print("Warning: Smallest ESI bin has 0 entries; ESI bars will show NaN where empty.")
+        print("Warning: Smallest ESI bin has 0 entries; ESI lines will show NaN where empty.")
     balanced_pos_esi = []
     balanced_yaw_esi = []
     for b in range(n_bins):
@@ -155,7 +155,7 @@ def main():
         idx = rng.choice(n, size=k, replace=False)
         balanced_pos_esi.append(pos_errors[idx])
         balanced_yaw_esi.append(yaw_errors[idx])
-    print("Mean, min, max for position error [m] and yaw error [deg] (balanced):\n")
+    print("Mean, min, max for position error [m] and yaw error [°] (balanced):\n")
     for b in range(n_bins):
         pos_errors = balanced_pos[b]
         yaw_errors = balanced_yaw[b]
@@ -167,7 +167,7 @@ def main():
         mean_pos, min_pos, max_pos = np.mean(pos_errors), np.min(pos_errors), np.max(pos_errors)
         mean_yaw, min_yaw, max_yaw = np.mean(yaw_errors), np.min(yaw_errors), np.max(yaw_errors)
         print(f"  Position error [m]:  mean = {mean_pos:.6f},  min = {min_pos:.6f},  max = {max_pos:.6f}")
-        print(f"  Yaw error [deg]:     mean = {mean_yaw:.6f},  min = {min_yaw:.6f},  max = {max_yaw:.6f}")
+        print(f"  Yaw error [°]:     mean = {mean_yaw:.6f},  min = {min_yaw:.6f},  max = {max_yaw:.6f}")
         print()
 
     # Mean of means for first 7 bins (reference)
@@ -180,7 +180,7 @@ def main():
     mean_of_means_yaw = np.nanmean(means_yaw[:n_ref])
     print(f"Mean of means (first {n_ref} bins):")
     print(f"  Position error [m]:  {mean_of_means_pos:.6f}")
-    print(f"  Yaw error [deg]:     {mean_of_means_yaw:.6f}\n")
+    print(f"  Yaw error [°]:     {mean_of_means_yaw:.6f}\n")
     # Differences from this mean for all 10 bins
     diff_pos = means_pos - mean_of_means_pos
     diff_yaw = means_yaw - mean_of_means_yaw
@@ -202,18 +202,18 @@ def main():
     color_esi_pos = "#fca5a5"   # light red
     color_esi_yaw = "#991b1b"   # dark red
 
-    (line_mira_pos,) = ax_means.plot(x_bins, means_pos, "o-", color=color_mira_pos, linewidth=linewidth_mira_init, label="MIRa position [m]", zorder=0)
-    (line_esi_pos,) = ax_means.plot(x_bins, np.nan_to_num(means_pos_esi, nan=np.nan), "o-", color=color_esi_pos, linewidth=linewidth_esi_init, label="ESI position [m]", zorder=2)
-    (line_mira_yaw,) = ax_means2.plot(x_bins, means_yaw, "s:", color=color_mira_yaw, linewidth=linewidth_mira_init, label="MIRa yaw [deg]", zorder=0)
-    (line_esi_yaw,) = ax_means2.plot(x_bins, np.nan_to_num(means_yaw_esi, nan=np.nan), "s:", color=color_esi_yaw, linewidth=linewidth_esi_init, label="ESI yaw [deg]", zorder=2)
+    (line_mira_pos,) = ax_means.plot(x_bins, means_pos, "o-", color=color_mira_pos, linewidth=linewidth_mira_init, label="Mean Position error [m] (MIRa bin)", zorder=0)
+    (line_esi_pos,) = ax_means.plot(x_bins, np.nan_to_num(means_pos_esi, nan=np.nan), "o-", color=color_esi_pos, linewidth=linewidth_esi_init, label="Mean Position error [m] (ESI bin)", zorder=2)
+    (line_mira_yaw,) = ax_means2.plot(x_bins, means_yaw, "s:", color=color_mira_yaw, linewidth=linewidth_mira_init, label="Mean Yaw error [°] (MIRa bin)", zorder=0)
+    (line_esi_yaw,) = ax_means2.plot(x_bins, np.nan_to_num(means_yaw_esi, nan=np.nan), "s:", color=color_esi_yaw, linewidth=linewidth_esi_init, label="Mean Yaw error [°] (ESI bin)", zorder=2)
 
     ax_means.set_ylabel("Position error [m]", color="black")
-    ax_means2.set_ylabel("Yaw error [deg]", color="black")
+    ax_means2.set_ylabel("Yaw error [°]", color="black")
     ax_means.tick_params(axis="y", labelcolor="black")
     ax_means2.tick_params(axis="y", labelcolor="black")
     ax_means.set_xlabel("Bin (same edges for MIRa and ESI)")
     ax_means.set_xticks(x_bins)
-    ax_means.set_xticklabels(BIN_LABELS, rotation=45, ha="right")
+    ax_means.set_xticklabels(BIN_LABELS, rotation=30, ha="right")
     ax_means.grid(True, alpha=0.3, axis="y")
     ax_means.set_title("Mean position and yaw error by bin")
     lines1, labels1 = ax_means.get_legend_handles_labels()
@@ -223,25 +223,38 @@ def main():
     plt.suptitle(f"MIRa balanced N={min_count}, ESI balanced N={min_count_esi} per bin")
 
     # Slider axes (below main plot)
-    plt.subplots_adjust(bottom=0.32)
+    plt.subplots_adjust(bottom=0.38)
     ax_legend_size = plt.axes([0.2, 0.22, 0.6, 0.03])
     ax_linewidth_mira = plt.axes([0.2, 0.17, 0.6, 0.03])
     ax_linewidth_esi = plt.axes([0.2, 0.12, 0.6, 0.03])
     ax_axis_fontsize = plt.axes([0.2, 0.07, 0.6, 0.03])
+    ax_dotted_gap = plt.axes([0.2, 0.02, 0.6, 0.03])
     slider_legend_size = Slider(ax_legend_size, "Legend font size", 6, 24, valinit=legend_fontsize_init, valstep=1)
     slider_linewidth_mira = Slider(ax_linewidth_mira, "MIRa line thickness", 0.5, 6.0, valinit=linewidth_mira_init, valstep=0.25)
     slider_linewidth_esi = Slider(ax_linewidth_esi, "ESI line thickness", 0.5, 6.0, valinit=linewidth_esi_init, valstep=0.25)
     axis_fontsize_init = 10
     slider_axis_fontsize = Slider(ax_axis_fontsize, "Axis numbers & labels size", 6, 24, valinit=axis_fontsize_init, valstep=1)
+    dotted_gap_init = 3
+    slider_dotted_gap = Slider(
+        ax_dotted_gap,
+        "Dotted line gap",
+        1,
+        20,
+        valinit=dotted_gap_init,
+        valstep=1,
+    )
 
     def update(_):
         lw_mira = slider_linewidth_mira.val
         lw_esi = slider_linewidth_esi.val
         axis_fontsize = slider_axis_fontsize.val
+        dotted_gap = int(slider_dotted_gap.val)
         line_mira_pos.set_linewidth(lw_mira)
         line_mira_yaw.set_linewidth(lw_mira)
         line_esi_pos.set_linewidth(lw_esi)
         line_esi_yaw.set_linewidth(lw_esi)
+        line_mira_yaw.set_linestyle((0, (1, dotted_gap)))
+        line_esi_yaw.set_linestyle((0, (1, dotted_gap)))
         for t in legend.get_texts():
             t.set_fontsize(slider_legend_size.val)
         ax_means.tick_params(axis="x", labelsize=axis_fontsize, labelcolor="black")
@@ -259,10 +272,11 @@ def main():
     slider_linewidth_mira.on_changed(update)
     slider_linewidth_esi.on_changed(update)
     slider_axis_fontsize.on_changed(update)
+    slider_dotted_gap.on_changed(update)
     update(None)
 
-    plt.savefig("max_errors_by_mira_bin.png", dpi=150, bbox_inches="tight")
-    print("Saved max_errors_by_mira_bin.png")
+    plt.savefig("mean_errors_by_mira_bin.png", dpi=150, bbox_inches="tight")
+    print("Saved mean_errors_by_mira_bin.png")
     plt.show()
 
 

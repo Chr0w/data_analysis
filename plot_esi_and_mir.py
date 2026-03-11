@@ -58,7 +58,7 @@ def main():
     
     # Path to the folder containing CSV files
     user_home = os.path.expanduser('~')
-    data_folder = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/default_amcl')
+    data_folder = os.path.join(user_home, 'pCloudDrive/Offline/PhD/Folders/test_data/article_data/old_data/default_amcl')
     
     # Load data using shared function
     print("Loading data...")
